@@ -1,0 +1,44 @@
+# Private content (career strategy, Chinese originals, internal guidelines)
+.private/
+
+# Build artifacts
+build/
+tmp/
+deploy/
+sstate-cache/
+downloads/
+
+# Compiled objects
+*.o
+*.ko
+*.mod
+*.mod.c
+*.cmd
+modules.order
+Module.symvers
+*.elf
+*.bin
+*.hex
+*.map
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+venv/
+.env
+
+# Yocto
+cache/
