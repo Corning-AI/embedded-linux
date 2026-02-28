@@ -1,6 +1,9 @@
 # Private content (career strategy, Chinese originals, internal guidelines)
 .private/
 
+# Claude Code local config
+.claude/
+
 # Build artifacts
 build/
 tmp/
