@@ -24,6 +24,14 @@ drivers/
 dts/
 └── imx8mp-evk-ov5640.dts   Annotated device tree overlay (camera pipeline)
 
+debug/
+├── 01-video-device-numbering   /dev/video0 is NOT the camera on i.MX8MP
+├── 02-camera-red-tint          ISI RGB/BGR format mismatch → color shift
+├── 03-galcore-not-in-lsmod     Built-in driver vs loadable module confusion
+├── 04-wifi-dns-resolution      WiFi connected but no DNS → resolv.conf
+├── 05-media-controller-pipeline  MC API graph setup for MIPI camera
+└── 06-weston-service-name      Service renamed between Yocto releases
+
 scripts/
 ├── build-multimedia.sh      Yocto build helper for imx-image-multimedia
 └── serial_transfer.py       File transfer over debug UART (base64)
