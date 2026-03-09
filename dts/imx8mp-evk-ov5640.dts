@@ -1,0 +1,181 @@
+// SPDX-License-Identifier: (GPL-2.0 OR MIT)
+/*
+ * imx8mp-evk-ov5640.dts — Device tree overlay for OV5640 camera on i.MX8MP EVK
+ *
+ * This file shows how hardware is described to the Linux kernel.
+ * The device tree is NOT code — it's a data structure that tells the kernel:
+ *   "At this address, there is this hardware, configured like this."
+ *
+ * The kernel NEVER probes hardware blindly. It reads the device tree
+ * to know what exists, then loads the matching driver.
+ *
+ * Key concepts:
+ *   - Each node = one hardware block (I2C bus, camera, clock, etc.)
+ *   - `compatible` string = matches a kernel driver
+ *   - `reg` = hardware address (I2C addr, MMIO base, etc.)
+ *   - `status = "okay"` = enabled; "disabled" = kernel ignores it
+ *   - phandle references (&label) = links between nodes
+ *
+ * Data flow described by this device tree:
+ *
+ *   OV5640 sensor (I2C1, addr 0x3c)
+ *       │
+ *       │  MIPI CSI-2 (2 data lanes, 24MHz MCLK)
+ *       ▼
+ *   MIPI CSI-2 receiver (mipi_csi0 @ 0x32e40000)
+ *       │
+ *       │  internal bus
+ *       ▼
+ *   ISI channel 0 (isi_0 @ 0x32e00000)
+ *       │
+ *       ▼
+ *   /dev/video3 (V4L2 capture node)
+ *
+ * On the EVK, NXP's base device tree (imx8mp-evk.dts) already includes
+ * OV5640 support. This overlay is for educational reference.
+ *
+ * Compile:
+ *   dtc -@ -I dts -O dtb -o imx8mp-evk-ov5640.dtbo imx8mp-evk-ov5640.dts
+ *
+ * Apply at runtime (if supported):
+ *   mkdir -p /sys/kernel/config/device-tree/overlays/cam
+ *   cat imx8mp-evk-ov5640.dtbo > /sys/kernel/config/device-tree/overlays/cam/dtbo
+ */
+
+/dts-v1/;
+/plugin/;
+
+&{/} {
+	/*
+	 * Clock provider for OV5640's MCLK (master clock).
+	 *
+	 * OV5640 needs an external clock input (XVCLK pin) to run its
+	 * internal PLL. The EVK provides 24 MHz from the SoC's CCM
+	 * (Clock Controller Module). We declare a fixed-clock node
+	 * so the camera driver can request it via the clocks property.
+	 */
+	cam_clk: cam-clk {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <24000000>;  /* 24 MHz — OV5640 XVCLK */
+		clock-output-names = "cam_mclk";
+	};
+
+	/*
+	 * GPIO-controlled regulator for camera power.
+	 *
+	 * The OV5640 module on the EVK is powered by a 3.3V rail
+	 * controlled by a GPIO. The regulator framework manages
+	 * power sequencing — the camera driver just says
+	 * "I need DOVDD" and the kernel handles the rest.
+	 */
+	reg_cam: regulator-cam {
+		compatible = "regulator-fixed";
+		regulator-name = "cam-3v3";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		/* gpio = <&gpio2 20 GPIO_ACTIVE_HIGH>; */
+		/* enable-active-high; */
+	};
+};
+
+/*
+ * I2C bus 1 — where the OV5640 sensor sits.
+ *
+ * I2C is a 2-wire bus (SDA + SCL). The i.MX8MP has 6 I2C controllers.
+ * I2C1 on the EVK connects to:
+ *   - PMIC (NXP PCA9450, addr 0x25)
+ *   - OV5640 camera (addr 0x3c) via MINISASTOCSI adapter
+ *
+ * The `reg = <0x3c>` tells the I2C core the slave address.
+ * When the kernel scans I2C1 and sees a device at 0x3c with
+ * compatible = "ovti,ov5640", it loads the ov5640.ko driver.
+ */
+&i2c2 {
+	#address-cells = <1>;
+	#size-cells = <0>;
+	status = "okay";
+
+	ov5640: camera@3c {
+		compatible = "ovti,ov5640";  /* matches drivers/media/i2c/ov5640.c */
+		reg = <0x3c>;                /* I2C slave address */
+		status = "okay";
+
+		/* Clock: 24 MHz from the fixed-clock node above */
+		clocks = <&cam_clk>;
+		clock-names = "xclk";
+
+		/* Power supplies (regulator framework handles sequencing) */
+		DOVDD-supply = <&reg_cam>;   /* digital I/O: 1.8V or 3.3V */
+		AVDD-supply  = <&reg_cam>;   /* analog: 2.8V */
+		DVDD-supply  = <&reg_cam>;   /* digital core: 1.5V */
+
+		/* Reset and power-down GPIOs (directly from i.MX8MP pins) */
+		/* reset-gpios    = <&gpio1 6  GPIO_ACTIVE_LOW>;  */
+		/* powerdown-gpios = <&gpio1 7 GPIO_ACTIVE_HIGH>; */
+
+		/*
+		 * MIPI CSI-2 output port.
+		 *
+		 * This "port" node describes the physical connection:
+		 * OV5640's MIPI TX → i.MX8MP's MIPI CSI-2 RX.
+		 *
+		 * OF graph bindings (Documentation/devicetree/bindings/graph.txt)
+		 * link source endpoints to sink endpoints, building the
+		 * media pipeline that `media-ctl -p` displays.
+		 *
+		 * Key parameters:
+		 *   data-lanes = <1 2>  → use MIPI lanes 1 and 2 (2-lane mode)
+		 *   clock-lanes = <0>   → MIPI clock on lane 0
+		 *   bus-type = <4>      → MIPI CSI-2 (defined in dt-bindings/media)
+		 *
+		 * The remote-endpoint phandle links to mipi_csi0's input port,
+		 * telling the kernel: "this camera connects to that receiver."
+		 */
+		port {
+			ov5640_to_mipi: endpoint {
+				remote-endpoint = <&mipi_csi0_from_ov5640>;
+				clock-lanes = <0>;
+				data-lanes = <1 2>;
+			};
+		};
+	};
+};
+
+/*
+ * MIPI CSI-2 receiver — the SoC's camera input interface.
+ *
+ * Hardware: Synopsys DesignWare MIPI CSI-2 Host controller
+ * Address:  0x32e40000 (in the i.MX8MP memory map)
+ *
+ * This block deserializes the MIPI D-PHY signal from the camera
+ * into parallel pixel data, then passes it to the ISI
+ * (Image Sensing Interface) for format conversion and DMA.
+ */
+&mipi_csi_0 {
+	status = "okay";
+
+	port@0 {
+		reg = <0>;
+		mipi_csi0_from_ov5640: endpoint {
+			remote-endpoint = <&ov5640_to_mipi>;
+			data-lanes = <2>;           /* 2-lane MIPI */
+		};
+	};
+};
+
+/*
+ * ISI (Image Sensing Interface) — NXP's camera DMA engine.
+ *
+ * The ISI sits between the MIPI receiver and system memory.
+ * It can perform:
+ *   - Color space conversion (YUV → RGB, etc.)
+ *   - Scaling / cropping
+ *   - DMA to system memory (this is what creates /dev/video3)
+ *
+ * The ISI is why the camera shows up as /dev/video3 (ISI capture)
+ * rather than /dev/video0 (which is the VPU encoder).
+ */
+&isi_0 {
+	status = "okay";
+};
