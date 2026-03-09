@@ -217,44 +217,62 @@ Deploy to: `/opt/camera-detect/detect_camera.py` on the EVK
 
 **Architecture:**
 
+```text
+┌──────────────────────────────────────────────────────────────┐
+│                    detect_camera.py                           │
+│                                                              │
+│  ┌──────────┐    ┌──────────┐    ┌────────────────────────┐  │
+│  │ v4l2src  │───→│ appsink  │───→│ Python processing      │  │
+│  │ /video3  │    │ (RGB)    │    │  • ObjectDetector (SSD) │  │
+│  │ 640x480  │    └──────────┘    │  • PoseEstimator (Move) │  │
+│  └──────────┘                    │  • draw boxes+skeleton  │  │
+│                                  │  • overlay FPS/latency  │  │
+│  ┌──────────┐    ┌──────────┐    │  • M7 heartbeat        │  │
+│  │ wayland  │←───│ appsrc   │←───│                        │  │
+│  │ sink     │    │ (RGB)    │    └────────────────────────┘  │
+│  │ HDMI J17 │    └──────────┘                                │
+│  └──────────┘                                                │
+└──────────────────────────────────────────────────────────────┘
 ```
-┌─────────────────────────────────────────────────────────┐
-│                  detect_camera.py                        │
-│                                                          │
-│  ┌──────────┐    ┌──────────┐    ┌───────────────────┐  │
-│  │ v4l2src  │───→│ appsink  │───→│ Python processing │  │
-│  │ /video3  │    │ (RGB)    │    │  • resize 300x300 │  │
-│  │ 640x480  │    └──────────┘    │  • TFLite + NPU   │  │
-│  └──────────┘                    │  • draw boxes      │  │
-│                                  │  • overlay FPS     │  │
-│  ┌──────────┐    ┌──────────┐    │  • M7 heartbeat   │  │
-│  │ wayland  │←───│ appsrc   │←───│                   │  │
-│  │ sink     │    │ (RGB)    │    └───────────────────┘  │
-│  │ HDMI J17 │    └──────────┘                           │
-│  └──────────┘                                           │
-└─────────────────────────────────────────────────────────┘
-```
+
+**Modes:**
+
+| Mode | Models | Best for |
+| ---- | ------ | -------- |
+| `--mode detect` | MobileNet SSD (objects) | Basic demo |
+| `--mode pose` | MoveNet (17-joint skeleton) | Pose tracking |
+| `--mode demo` | Both models simultaneously | **Demo video!** |
+| `--mode demo --compare` | NPU + CPU for each model | Show NPU speedup |
 
 **Key design choices:**
 
 - **Two GStreamer pipelines**: capture (v4l2src→appsink) and display (appsrc→waylandsink), connected by Python processing loop
-- **PIL for drawing** (not OpenCV — it's not in the image, and PIL is sufficient for boxes + text)
+- **PIL for drawing** (not OpenCV — it's not in the image, and PIL is sufficient for boxes + skeleton)
+- **Colored skeleton**: body regions use different colors (head=cyan, arms=green/yellow, legs=orange/red)
+- **Corner accents**: bounding boxes have white corner markers for extra visual polish
 - **M7 heartbeat**: optional, reads `/dev/ttyRPMSG0` in a background thread
-- **Wayland env vars**: auto-set `XDG_RUNTIME_DIR` and `WAYLAND_DISPLAY` for SSH sessions
+- **`--compare` mode**: runs both NPU and CPU, shows speedup ratio on screen (e.g., "CPU: 45ms = 5x slower")
 
 **Deploy and run:**
 
 ```bash
-# From Windows host:
+# Download models (on EVK with WiFi):
+bash /opt/camera-detect/download_models.sh
+
+# Or download on PC and transfer:
+bash scripts/download_models.sh
+scp /tmp/models/* root@192.168.1.98:/opt/models/
+
+# Deploy app:
 scp app/camera-detect/detect_camera.py root@192.168.1.98:/opt/camera-detect/
 
-# On EVK (via SSH):
+# Run on EVK (via SSH):
 export XDG_RUNTIME_DIR=/run/user/0 WAYLAND_DISPLAY=wayland-1
 
-python3 /opt/camera-detect/detect_camera.py              # NPU mode
-python3 /opt/camera-detect/detect_camera.py --cpu        # CPU for comparison
-python3 /opt/camera-detect/detect_camera.py --no-display # headless
-python3 /opt/camera-detect/detect_camera.py --threshold 0.3  # lower confidence
+python3 /opt/camera-detect/detect_camera.py --mode demo          # BEST for video
+python3 /opt/camera-detect/detect_camera.py --mode demo --compare # show NPU vs CPU
+python3 /opt/camera-detect/detect_camera.py --mode pose           # skeleton only
+python3 /opt/camera-detect/detect_camera.py --cpu                 # CPU for comparison
 ```
 
 **Dependencies** (all pre-installed in imx-image-multimedia):
@@ -262,9 +280,17 @@ python3 /opt/camera-detect/detect_camera.py --threshold 0.3  # lower confidence
 | Package | Purpose |
 | ------- | ------- |
 | `tflite_runtime` | Inference engine with VX Delegate (NPU) |
-| `Pillow` (PIL) | Drawing bounding boxes, labels, overlay text |
+| `Pillow` (PIL) | Drawing bounding boxes, skeleton, overlay text |
 | `gi` (GStreamer Python) | Camera capture via V4L2, display via Wayland |
 | `numpy` | Frame data manipulation |
+
+**Models** (download with `scripts/download_models.sh`):
+
+| Model | File | Size | Input | NPU Latency |
+| ----- | ---- | ---- | ----- | ----------- |
+| MobileNet SSD v1 INT8 | `detect.tflite` | 4.2 MB | 300×300 | ~9 ms |
+| MoveNet Lightning INT8 | `movenet.tflite` | ~3 MB | 192×192 | ~10-15 ms |
+| COCO labels | `labelmap.txt` | 1 KB | — | — |
 
 ### Step 9 — Add M7 FreeRTOS heartbeat via RPMsg
 
@@ -274,7 +300,7 @@ Source: `m7-firmware/rpmsg-heartbeat/main_remote.c`
 
 The i.MX8MP has a Cortex-M7 coprocessor alongside the A53 Linux cores. They communicate via RPMsg (Remote Processor Messaging) over shared memory:
 
-```
+```text
 ┌──────────────────┐    RPMsg (VirtIO)    ┌──────────────────┐
 │  Cortex-A53 (×4) │◄══════════════════►│  Cortex-M7       │
 │  Linux 6.6       │  /dev/ttyRPMSG0     │  FreeRTOS        │
@@ -289,6 +315,7 @@ The i.MX8MP has a Cortex-M7 coprocessor alongside the A53 Linux cores. They comm
 ```
 
 **The M7 firmware does:**
+
 1. Sends `"HB:<counter>:<uptime_ms>"` every 1 second
 2. Echoes back any message received from Linux with `"echo: "` prefix
 
@@ -354,11 +381,12 @@ Update this file with:
 
 | What | Path |
 | ---- | ---- |
-| Detection model | `/opt/models/detect.tflite` |
-| COCO labels | `/opt/models/coco_labels.txt` |
+| Object detection model | `/opt/models/detect.tflite` |
+| Pose estimation model | `/opt/models/movenet.tflite` |
+| COCO labels | `/opt/models/labelmap.txt` |
 | Detection app | `/opt/camera-detect/detect_camera.py` |
 | VX Delegate | `/usr/lib/libvx_delegate.so` |
-| M7 firmware | `/lib/firmware/rpmsg_lite_str_echo_rtos.elf` |
+| M7 firmware | `/lib/firmware/rpmsg_heartbeat.elf` |
 
 **In the repo:**
 
@@ -366,7 +394,10 @@ Update this file with:
 | ---- | ---- |
 | This document | `docs/07-camera-npu.md` |
 | Detection app source | `app/camera-detect/detect_camera.py` |
-| Model download script | `scripts/download_model.sh` |
+| Model download script | `scripts/download_models.sh` |
+| Deploy script | `scripts/deploy_detect.sh` |
+| M7 firmware source | `m7-firmware/rpmsg-heartbeat/main_remote.c` |
+| M7 load/test script | `m7-firmware/rpmsg-heartbeat/load_m7.sh` |
 | Demo video / GIF | `docs/assets/demo-detection.gif` |
 
 ## Troubleshooting
@@ -374,9 +405,10 @@ Update this file with:
 | Problem | Solution |
 | ------- | -------- |
 | OV5640 not detected | Re-seat mini-SAS cable on J12; check `dmesg` for I2C errors on bus 1 |
-| No video on HDMI | `systemctl status weston`; re-seat HDMI adapter board |
-| `waylandsink` fails | Try `fbdevsink` or run as root |
-| OpenCV not available | Use GStreamer Python bindings; or rebuild Yocto with `opencv` |
-| No internet for model download | Download on PC, `scp` to board |
-| VX Delegate fails | Check `lsmod \| grep galcore`; try `modprobe galcore` |
-| `/dev/ttyRPMSG*` missing | Check device tree rpmsg node and reserved memory regions |
+| No video on HDMI | `systemctl status weston.service`; re-seat HDMI cable on J17 |
+| `waylandsink` fails (SSH) | `export XDG_RUNTIME_DIR=/run/user/0 WAYLAND_DISPLAY=wayland-1` |
+| Model not found | Run `scripts/download_models.sh` on EVK or download on PC + scp |
+| VX Delegate fails | `galcore` is built-in (not module); check `dmesg \| grep galcore` |
+| MoveNet slow on NPU | Some ops may fall back to CPU; still faster than pure CPU |
+| `/dev/ttyRPMSG*` missing | M7 firmware not loaded; see Step 9 load instructions |
+| Low FPS in demo mode | Both models run sequentially; expected ~20 FPS in demo mode |
