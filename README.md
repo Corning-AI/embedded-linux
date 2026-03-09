@@ -4,9 +4,14 @@ Full-stack embedded Linux project on the NXP i.MX 8M Plus EVK — from Yocto BSP
 
 ## Demo
 
-![Real-time object detection on i.MX8MP EVK](media/demo.mp4)
+<p align="center">
+  <a href="https://github.com/Corning-AI/embedded-linux/blob/main/media/demo.mp4">
+    <img src="media/demo-play-thumb.jpg" alt="Click to play: real-time object detection on i.MX8MP" width="360">
+  </a>
+</p>
+<p align="center"><em>Click to play — 68s demo of real-time NPU object detection on HDMI</em></p>
 
-Live OV5640 camera → MobileNet SSD v2 on NPU (11ms/frame) → bounding boxes on HDMI. Detects persons, phones, bottles and 80 COCO classes.
+Live OV5640 camera → MobileNet SSD v2 on the 2.3 TOPS NPU (11ms/frame) → bounding boxes rendered to HDMI at 9 FPS. Detects persons, phones, bottles across 80 COCO classes.
 
 | | NPU | CPU | Speedup |
 |---|-----|-----|---------|
