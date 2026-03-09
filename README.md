@@ -1,158 +1,120 @@
 # Edge AI on Embedded Linux — i.MX 8M Plus
 
-> **Real-time object detection at 11ms per frame** on a 2.3 TOPS NPU, with live MIPI camera feed rendered to HDMI.
-> Full BSP bring-up, kernel drivers, WiFi/BT, and NPU-accelerated inference — from first boot to working demo.
+Full-stack embedded Linux project on the NXP i.MX 8M Plus EVK — from Yocto BSP bring-up to real-time NPU object detection with live camera feed on HDMI.
 
----
+## Demo
 
-## Live Demo — NPU-Accelerated Object Detection
+![Real-time object detection on i.MX8MP EVK](media/demo.mp4)
 
-https://github.com/Corning-AI/embedded-linux/raw/main/media/demo.mp4
+Live OV5640 camera → MobileNet SSD v2 on NPU (11ms/frame) → bounding boxes on HDMI. Detects persons, phones, bottles and 80 COCO classes.
 
-> 68-second demo: **person**, **cell phone**, **bottle** detected in real-time — **NPU 11ms/frame**, **9 FPS** end-to-end on the 2.3 TOPS NPU
+| | NPU | CPU | Speedup |
+|---|-----|-----|---------|
+| MobileNet SSD v2 (detection) | 11 ms | 45 ms | 4x |
+| MoveNet Lightning (pose, 17 joints) | 13 ms | 26 ms | 2x |
+
+```
+OV5640 (MIPI-CSI2) → ISI DMA → GStreamer appsink → TFLite INT8 + VX Delegate → overlay → HDMI
+  /dev/video3          zero-copy     numpy              NPU 11ms/frame          PIL      waylandsink
+```
 
 <table>
 <tr>
 <td width="33%" align="center">
 <img src="media/demo-detection-3.jpg" width="240"><br>
-<sub><strong>3 objects</strong> — person + phone + bottle</sub>
+<sub>3 objects detected simultaneously</sub>
 </td>
 <td width="33%" align="center">
 <img src="media/demo-detection-2.jpg" width="240"><br>
-<sub><strong>NPU 11.3ms</strong> — consistent ultra-low latency</sub>
+<sub>NPU 11.3ms — stable across frames</sub>
 </td>
 <td width="33%" align="center">
 <img src="media/demo-person-84.jpg" width="240"><br>
-<sub><strong>person 84%</strong> — high-confidence detection</sub>
+<sub>person 84% confidence</sub>
 </td>
 </tr>
 </table>
 
-### Key Results
-
-| Metric | Value |
-|--------|-------|
-| **NPU inference latency** | **11 ms** (MobileNet SSD v2, INT8 quantized) |
-| **End-to-end pipeline** | **9 FPS** (camera → NPU → overlay → HDMI) |
-| **Detectable classes** | **80** (COCO: person, phone, bottle, laptop, book…) |
-| **NPU vs CPU speedup** | **4× faster** (11ms vs 45ms per frame) |
-| **Pose estimation** | **13 ms** (MoveNet Lightning, 17 keypoints) |
-
-### End-to-End Pipeline
+## What's in this repo
 
 ```
-OV5640 ──MIPI CSI-2──▶ ISI DMA ──▶ GStreamer appsink ──▶ TFLite + NPU ──▶ PIL overlay ──▶ HDMI
- Camera     2-lane        /dev/video3    Python/numpy      VX Delegate       bounding      waylandsink
- 640×480                                                    ~11ms/frame       boxes+labels
+app/camera-detect/         Detection + pose estimation app (Python, GStreamer, TFLite)
+kernel-modules/
+├── hello/                 Minimal loadable kernel module
+├── chardev/               Character device with file_operations, ioctl, mutex
+└── bme280/                I2C client driver with sysfs + device tree matching
+drivers/v4l2-capture/      V4L2 multi-planar mmap capture (C)
+dts/                       Device tree overlay for OV5640 camera pipeline
+debug/                     6 real debug cases from bring-up (with root cause)
+scripts/                   Yocto build helper, serial file transfer
+docs/                      Hardware guide, BSP build, WiFi/BT, camera+NPU docs
 ```
-
----
-
-## What This Project Covers
-
-This is a **full-stack embedded Linux + edge AI** project on the NXP i.MX 8M Plus EVK, covering every layer from silicon to application:
-
-| Layer | What's Done | Difficulty |
-|-------|-------------|------------|
-| **BSP** | Yocto Scarthgap custom image build (`imx-image-multimedia`) | Medium |
-| **Kernel drivers** | 3 out-of-tree modules (hello → chardev → I2C BME280) | Medium |
-| **Device tree** | Annotated camera pipeline overlay (MIPI CSI-2 → ISI) | Hard |
-| **V4L2 userspace** | C program with multi-planar mmap capture | Medium |
-| **WiFi/BT bring-up** | DTB binary patch + PCIe/UART driver loading | Hard |
-| **Camera pipeline** | GStreamer → appsink → numpy (zero-copy DMA) | Medium |
-| **NPU inference** | TFLite INT8 + VX Delegate on 2.3 TOPS NPU | Hard |
-| **Edge AI app** | Real-time detection + pose + OSD → HDMI display | Hard |
-| **Debug methodology** | 6 documented debug cases with root cause analysis | — |
-
----
 
 ## Hardware
 
-| Component | Spec |
-|-----------|------|
-| **SoC** | NXP i.MX 8M Plus — quad Cortex-A53 (1.8 GHz) + Cortex-M7 + **2.3 TOPS NPU** |
-| **Board** | 8MPLUSLPD4-EVK (6 GB LPDDR4, 32 GB eMMC) |
-| **Camera** | OV5640 MIPI CSI-2 via MINISASTOCSI adapter (J12) |
-| **Display** | HDMI 2.0a (J17), Weston/Wayland compositor |
-| **WiFi/BT** | AzureWave AW-CM276NF (NXP 88W8997, PCIe + UART) |
-| **Kernel** | 6.6.52-lts (Yocto Scarthgap) |
+- NXP i.MX 8M Plus EVK (quad A53 + M7 + 2.3 TOPS NPU, 6 GB LPDDR4)
+- OV5640 MIPI CSI-2 camera on J12
+- HDMI output on J17, Weston/Wayland
+- AzureWave AW-CM276NF WiFi/BT (NXP 88W8997, PCIe + UART)
+- Kernel 6.6.52-lts, Yocto Scarthgap
 
-## Repository Structure
-
-```
-app/camera-detect/         Real-time edge AI app (detection + pose + demo modes)
-kernel-modules/
-├── hello/                 Minimal loadable kernel module
-├── chardev/               Character device driver (/dev node, ioctl, mutex)
-└── bme280/                I2C client driver with sysfs interface
-drivers/v4l2-capture/      V4L2 mmap frame capture (C, multi-planar API)
-dts/                       Annotated device tree overlay (OV5640 → ISI pipeline)
-debug/                     6 documented hardware/driver debug cases
-scripts/                   Yocto build helper, serial file transfer tool
-docs/                      Step-by-step guides: BSP, hardware, WiFi/BT, camera, NPU
-```
-
-## Quick Start
+## Quick start
 
 ```bash
-# 1. Build the Yocto image (Ubuntu 22.04 host)
+# Build Yocto image (Ubuntu 22.04 host, ~2h first time)
 source scripts/build-multimedia.sh
 
-# 2. Flash SD card (Rufus DD mode), set SW4: OFF OFF ON ON
+# Flash SD (Rufus DD mode), boot switches SW4: OFF OFF ON ON
+# Connect: USB-C → J5 (power), micro-USB → J23 (UART, 3rd COM port, 115200)
 
-# 3. Connect: USB-C → J5 (power), micro-USB → J23 (debug UART, 3rd COM port, 115200)
-
-# 4. Run the edge AI demo on the EVK
+# Run detection demo on EVK
 export XDG_RUNTIME_DIR=/run/user/0 WAYLAND_DISPLAY=wayland-1
 python3 /opt/camera-detect/detect_camera.py --mode demo
 ```
 
-## Edge AI Detection App
+## Detection app
 
 ```bash
-python3 detect_camera.py                         # Object detection (MobileNet SSD v2)
-python3 detect_camera.py --mode pose              # Pose estimation (MoveNet, 17 joints)
-python3 detect_camera.py --mode demo              # Both models simultaneously
-python3 detect_camera.py --mode demo --compare    # NPU vs CPU side-by-side benchmark
-python3 detect_camera.py --no-display             # Headless mode (SSH/serial output only)
+python3 detect_camera.py                         # Object detection
+python3 detect_camera.py --mode pose              # Pose estimation
+python3 detect_camera.py --mode demo              # Both simultaneously
+python3 detect_camera.py --mode demo --compare    # NPU vs CPU benchmark
+python3 detect_camera.py --no-display             # Headless (serial/SSH)
 ```
 
-Features: real-time OSD (FPS, latency, object count), NMS post-processing, multi-model support, Wayland/HDMI output, headless mode.
+Real-time OSD overlay with FPS, latency, object count. NMS post-processing, multi-model, Wayland output.
 
-## Kernel Modules
+## Kernel modules
 
-Three out-of-tree modules with progressive complexity:
+Three out-of-tree modules, each building on the previous:
 
-| Module | Concepts |
-|--------|----------|
-| **hello** | `module_init`/`module_exit`, `printk`, `__init`/`__exit` section markers |
-| **chardev** | `file_operations`, `copy_to_user`/`copy_from_user`, mutex, dynamic major, `class_create`/`device_create` |
-| **bme280** | I2C client driver, device tree `compatible` matching, `i2c_smbus_*`, sysfs attributes, `devm_` managed alloc |
+- **hello** — `module_init`/`exit`, `printk`, `__init`/`__exit` sections
+- **chardev** — full char device: `file_operations`, `copy_to_user`/`copy_from_user`, mutex, automatic `/dev` node
+- **bme280** — I2C client driver: device tree matching, `i2c_smbus_*`, sysfs attributes, `devm_` managed alloc
 
-## Debug Notes
+## Debug log
 
-Real debugging cases encountered during bring-up — each with root cause and fix:
+Issues hit during bring-up, documented with root cause:
 
-| # | Issue | Root Cause |
-|---|-------|-----------|
-| 01 | `/dev/video0` is not the camera | VPU encoder registered first; ISI capture = `/dev/video3` |
-| 02 | Camera feed has red tint | ISI outputs BGR, app assumed RGB |
-| 03 | `galcore` not in `lsmod` | Built-in kernel driver, not a loadable module |
-| 04 | WiFi connected but no DNS | `resolv.conf` not populated by DHCP client |
-| 05 | Camera pipeline won't start | Media controller link setup required before streaming |
-| 06 | `weston@root` service not found | Renamed to `weston.service` in newer Yocto |
+| Issue | Root cause |
+|-------|-----------|
+| `/dev/video0` is not the camera | VPU encoder grabs video0; camera = `/dev/video3` |
+| Camera feed has red tint | ISI outputs BGR, code assumed RGB |
+| `galcore` missing from `lsmod` | Built-in to kernel, not a loadable module |
+| WiFi up but no DNS | `resolv.conf` empty, DHCP client didn't write it |
+| Camera stream won't start | Need media-ctl link setup before streaming |
+| `weston@root` service not found | Renamed to `weston.service` in Scarthgap |
 
-## Roadmap
+## Progress
 
-- [x] Yocto BSP build and first boot
-- [x] Camera: OV5640 → MIPI CSI-2 → ISI → GStreamer → HDMI
-- [x] NPU stack: galcore + VX Delegate + TFLite INT8
-- [x] Kernel modules: hello → chardev → I2C driver
-- [x] V4L2 capture (C) and device tree overlay
-- [x] WiFi (PCIe) + Bluetooth (UART) bring-up
-- [x] NPU benchmark: 11ms NPU vs 45ms CPU
-- [x] **Real-time edge AI: camera → NPU → overlay → HDMI**
-- [ ] FreeRTOS on Cortex-M7 + RPMsg inter-core communication
+- [x] Yocto BSP build, SD boot
+- [x] Camera: OV5640 → MIPI CSI-2 → ISI → GStreamer → HDMI preview
+- [x] NPU: galcore + VX Delegate + TFLite INT8 verified
+- [x] Kernel modules (hello → chardev → I2C)
+- [x] V4L2 capture (C) + device tree overlay
+- [x] WiFi (PCIe) + Bluetooth (UART)
+- [x] Real-time detection: camera → NPU 11ms → overlay → HDMI
+- [ ] FreeRTOS on M7 + RPMsg
 
 ## License
 
