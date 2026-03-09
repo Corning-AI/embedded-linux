@@ -4,6 +4,9 @@
 # Claude Code local config
 .claude/
 
+# Datasheets (copyrighted, do not redistribute)
+docs/datasheets/
+
 # Build artifacts
 build/
 tmp/

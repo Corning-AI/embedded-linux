@@ -4,13 +4,15 @@
 
 The 8MPLUSLPD4-EVK box should contain:
 
-- [x] i.MX 8M Plus EVK main board (with LPDDR4 + eMMC)
-- [x] 12 V / 5 A power adapter
-- [x] USB-C cable (for USB OTG)
+- [x] i.MX 8M Plus EVK main board (with LPDDR4 6 GB + eMMC 32 GB)
+- [x] USB Type-C 45 W PD power supply (5V/3A, 9V/3A, 15V/3A, 20V/2.25A)
+- [x] USB-C cable (for USB 3.0 data)
+- [x] USB micro-B cable (for debug UART J23)
+- [x] USB Type-C to A adapter
 - [x] Quick Start Guide card
-- [ ] **Not included** — serial cable. I bought an FTDI 3.3 V cable separately.
-- [ ] **Not included** — SD card. I picked up an industrial-grade one.
-- [ ] **Not included** — Ethernet cable. I'm using a spare from the lab.
+- [ ] **Not included** — SD card (I'm using SanDisk 64 GB SDXC)
+- [ ] **Not included** — HDMI display + cable
+- [ ] **Not included** — Ethernet cable
 
 ## EVK Connector Map
 
@@ -18,47 +20,36 @@ The 8MPLUSLPD4-EVK box should contain:
 
 | Ref | Connector | Notes |
 |-----|-----------|-------|
-| J23 | Micro USB (Debug UART) | **The most important connector for bring-up.** Plug this in and the on-board FTDI chip enumerates as 4 ttyUSB devices. |
+| J5 | USB Type-C Port0 (Power) | **Power supply ONLY.** The only port for power delivery. |
+| J6 | USB Type-C Port1 (USB 3.0) | USB data / UUU flashing. Not for power! |
+| J23 | Micro USB (Debug UART) | **The most important connector for bring-up.** On-board FTDI enumerates as 4 serial ports. |
 | J21 | 40-pin expansion header | RPi-style GPIO header — used for sensors. |
-| J6 | USB Type-C (OTG) | Image flashing via UUU / OTG mode. |
 | J11 | USB 3.0 Type-A | External USB devices. |
-| J7 | HDMI | Display output. |
+| J7 | HDMI | Display output (via adapter board). |
 | J10 | GbE RJ45 (1) | Ethernet port 1. |
-| J11A | GbE RJ45 (2) | Ethernet port 2. |
+| J11A | GbE RJ45 (2) | Ethernet port 2 (with TSN). |
 | J801 | MIPI CSI | Camera input (needs MINISASTOCSI adapter board). |
-| J3 | SD card slot | Boot from the SD card you've flashed. |
-| SW4 | Boot Mode DIP switch | Selects the boot source. |
-| SW1 | Power ON/OFF | Main power switch. |
+| J3 | MicroSD card slot (bottom) | Boot from the SD card you've flashed. |
+| SW4 | Boot Mode DIP switch | Selects the boot source (see table below). |
+| SW3 | Power ON/OFF | Main power switch (slide to ON). |
 
 ## Boot Mode DIP Switch (SW4)
 
 **Power off the board before touching the DIP switch!**
 
-### SD Card Boot (day-to-day development)
+### Boot Device Settings (from NXP QSG, 1=ON 0=OFF)
 
-| SW4[1] | SW4[2] | SW4[3] | SW4[4] |
-|--------|--------|--------|--------|
-| OFF | ON | OFF | OFF |
+| Boot Device | SW4-1 | SW4-2 | SW4-3 | SW4-4 | Use Case |
+|-------------|-------|-------|-------|-------|----------|
+| Boot From Fuses | OFF | OFF | OFF | OFF | Factory default |
+| USB Serial Download | OFF | OFF | OFF | ON | UUU flashing |
+| **eMMC (USDHC3)** | OFF | OFF | ON | OFF | Production (default from NXP) |
+| **SD Card (USDHC2)** | **OFF** | **OFF** | **ON** | **ON** | **Day-to-day development** |
+| NAND | OFF | ON | OFF | OFF | NAND flash boot |
+| QSPI 3B Read | OFF | ON | ON | OFF | QSPI NOR boot |
+| ecSPI Boot | ON | OFF | OFF | OFF | SPI boot |
 
-Use this for: first Yocto image boot, daily development and debugging.
-
-### eMMC Boot (production)
-
-| SW4[1] | SW4[2] | SW4[3] | SW4[4] |
-|--------|--------|--------|--------|
-| ON | OFF | OFF | OFF |
-
-Use this for: final deployment to the on-board eMMC.
-
-### Serial Download (USB flashing)
-
-| SW4[1] | SW4[2] | SW4[3] | SW4[4] |
-|--------|--------|--------|--------|
-| OFF | OFF | OFF | OFF |
-
-Use this for: flashing images over USB with the UUU tool.
-
-> Reference: i.MX 8M Plus EVK Quick Start Guide (UG10164)
+> Reference: i.MX 8M Plus EVK Quick Start Guide (8MPLUSEVKQSG), Table 4
 
 ## Serial Console
 
@@ -67,16 +58,30 @@ Use this for: flashing images over USB with the UUU tool.
 1. Connect J23 (Micro USB Debug Port) to your host PC with a USB cable.
 2. The on-board FTDI chip enumerates as **4 serial devices**.
 
-### Serial Devices on the Linux Host
+### Serial Devices
+
+The FTDI chip on J23 registers **4 serial ports**. The third port is the A53 Linux console, the fourth is M7.
+
+**Windows (Device Manager → Ports):**
 
 ```
-/dev/ttyUSB0 — Cortex-A53 UART (rarely used; depends on firmware revision)
-/dev/ttyUSB1 — reserved
-/dev/ttyUSB2 — **Cortex-A53 Linux console** (the one you want most of the time)
+COM3 — Port 1 (not used)
+COM4 — Port 2 (not used)
+COM5 — **Cortex-A53 Linux console** ← use this
+COM6 — **Cortex-M7 console** (FreeRTOS output)
+```
+
+> COM numbers may shift if other USB-serial devices are plugged in. Check Device Manager.
+
+**Linux Host:**
+
+```
+/dev/ttyUSB0 — Port 1
+/dev/ttyUSB1 — Port 2
+/dev/ttyUSB2 — **Cortex-A53 Linux console** ← use this
 /dev/ttyUSB3 — **Cortex-M7 console** (FreeRTOS output)
 ```
 
-> The actual numbers can shift if you already have other USB-serial adapters plugged in.
 > Run `dmesg | grep ttyUSB` to confirm.
 
 ### Serial Parameters
@@ -185,14 +190,94 @@ EVK J801 (MIPI CSI)
 
 ## Pre-Power-On Checklist
 
-- [ ] Boot Mode DIP switch SW4 set to SD card mode
-- [ ] SD card (with a flashed Yocto image) inserted into J3
-- [ ] Debug USB cable connected from J23 to host PC
-- [ ] Serial terminal open (115200 8N1)
-- [ ] 12 V power adapter plugged in
+- [ ] Boot Mode DIP switch SW4 set to SD card mode (`OFF OFF ON ON`)
+- [ ] SD card (with a flashed Yocto image) inserted into J3 (bottom of board)
+- [ ] Debug USB cable (micro-B) connected from J23 to host PC
+- [ ] Serial terminal open on **3rd COM port** (115200 8N1) — COM5 on Windows, /dev/ttyUSB2 on Linux
+- [ ] USB-C 45W PD power supply plugged into **J5** (NOT J6!)
 - [ ] Sensor wiring double-checked (3.3 V only — don't connect 5 V!)
 
-Press SW1 (Power). You should see U-Boot messages scrolling in your serial terminal.
+Slide **SW3** to ON. You should see U-Boot messages scrolling in your serial terminal within 1 second.
+
+## First Boot Verification (2026-03-09)
+
+Verified after first successful SD card boot with NXP Yocto scarthgap image.
+
+### CPU — 4x Cortex-A53
+
+```
+$ cat /proc/cpuinfo
+processor       : 0–3
+BogoMIPS        : 16.00
+Features        : fp asimd evtstrm aes pmull sha1 sha2 crc32 cpuid
+CPU implementer : 0x41 (ARM)
+CPU architecture: 8
+CPU part        : 0xd03 (Cortex-A53)
+CPU revision    : 4
+```
+
+All 4 cores online. Hardware crypto extensions (AES, SHA1, SHA2) available.
+
+### Memory — 5.5 GiB usable (of 6 GB LPDDR4)
+
+```
+$ free -h
+               total        used        free      shared  buff/cache   available
+Mem:           5.5Gi       266Mi       5.2Gi        10Mi       161Mi       5.2Gi
+Swap:             0B          0B          0B
+```
+
+~500 MB reserved by kernel (CMA, reserved memory regions for M7/VPU/GPU). No swap configured.
+
+### Storage
+
+```bash
+$ lsblk
+NAME         MAJ:MIN RM   SIZE RO TYPE MOUNTPOINTS
+mtdblock0     31:0    0    32M  0 disk                          ← SPI NOR Flash
+mmcblk2      179:0    0  29.1G  0 disk                          ← eMMC (on-board)
+├─mmcblk2p1  179:1    0  83.2M  0 part /run/media/boot-mmcblk2p1
+└─mmcblk2p2  179:2    0   3.5G  0 part /run/media/root-mmcblk2p2
+mmcblk1      179:96   0  59.5G  0 disk                          ← SD card (boot)
+├─mmcblk1p1  179:97   0 332.8M  0 part /run/media/boot-mmcblk1p1
+└─mmcblk1p2  179:98   0   1.8G  0 part /                        ← rootfs
+```
+
+- **SD card** (`mmcblk1`): 59.5 GB SanDisk SDXC, root filesystem on p2
+- **eMMC** (`mmcblk2`): 29.1 GB on-board, factory image auto-mounted
+- **SPI NOR** (`mtdblock0`): 32 MB, stores U-Boot backup
+
+### Network
+
+```bash
+$ ip addr
+eth0: <NO-CARRIER> mtu 1500  MAC 00:04:9f:09:74:df  state DOWN   ← FEC (J10)
+eth1: <NO-CARRIER> mtu 1500  MAC 00:04:9f:09:74:e0  state DOWN   ← DWMAC (J11A, TSN)
+can0: state DOWN                                                   ← CAN bus
+```
+
+Both Ethernet interfaces detected but no cable connected (state DOWN). No on-board Wi-Fi/BT — use Ethernet cable or USB Wi-Fi adapter.
+
+### I2C Buses
+
+```bash
+$ i2cdetect -l
+i2c-0   30a20000.i2c   ← I2C1 (PMIC, board management)
+i2c-1   30a30000.i2c   ← I2C2 (for M7: MPU6050 + SSD1306)
+i2c-2   30a40000.i2c   ← I2C3 (for A53: BME280)
+i2c-6   DesignWare HDMI ← HDMI DDC
+```
+
+Hardware-to-Linux bus mapping:
+
+| Hardware Bus | Linux Device | Base Address | Project Use |
+| ------------ | ------------ | ------------ | ----------- |
+| I2C1 | `i2c-0` | 0x30A20000 | Board management (PMIC, etc.) |
+| I2C2 | `i2c-1` | 0x30A30000 | M7 FreeRTOS — MPU6050 + SSD1306 |
+| I2C3 | `i2c-2` | 0x30A40000 | A53 Linux — BME280 sensor |
+| HDMI DDC | `i2c-6` | — | HDMI EDID (automatic) |
+
+> **Note:** I2C2 (`i2c-1`) is currently managed by Linux. When the M7 core takes over for FreeRTOS, this bus must be disabled in the Linux device tree to avoid bus contention.
 
 ## Next Step
 
