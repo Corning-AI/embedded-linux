@@ -5,7 +5,7 @@ detect_camera.py — Real-time AI demo on i.MX8MP EVK
 Pipeline:  OV5640 camera ──> NPU inference ──> visual overlay ──> HDMI display
 
 Modes:
-  detect  — Object detection (MobileNet SSD v1, 80 COCO classes)
+  detect  — Object detection (SSD v1/v2 or YOLOv8n, 80 COCO classes)
   pose    — Pose estimation (MoveNet Lightning, 17-joint skeleton)
   demo    — Both models running simultaneously (most impressive!)
 
@@ -55,9 +55,30 @@ FPS         = 30
 VX_DELEGATE = "/usr/lib/libvx_delegate.so"
 RPMSG_DEV   = "/dev/ttyRPMSG0"
 
-MODEL_DETECT = "/opt/models/detect.tflite"
+MODELS_DETECT = {
+    "ssd_v1":  "/opt/models/detect.tflite",          # 4.2MB, ~9ms NPU
+    "ssd_v2":  "/opt/models/ssd_v2.tflite",          # 6.0MB, ~11ms NPU
+    "yolov8n": "/opt/models/yolov8n_fullint.tflite",  # 3.2MB, ~18ms NPU
+}
 MODEL_POSE   = "/opt/models/movenet.tflite"
 LABEL_PATH   = "/opt/models/labelmap.txt"
+
+# YOLO uses compact 0-indexed class IDs (no gaps), unlike COCO category IDs
+YOLO_CLASSES = [
+    "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train",
+    "truck", "boat", "traffic light", "fire hydrant", "stop sign",
+    "parking meter", "bench", "bird", "cat", "dog", "horse", "sheep",
+    "cow", "elephant", "bear", "zebra", "giraffe", "backpack", "umbrella",
+    "handbag", "tie", "suitcase", "frisbee", "skis", "snowboard",
+    "sports ball", "kite", "baseball bat", "baseball glove", "skateboard",
+    "surfboard", "tennis racket", "bottle", "wine glass", "cup", "fork",
+    "knife", "spoon", "bowl", "banana", "apple", "sandwich", "orange",
+    "broccoli", "carrot", "hot dog", "pizza", "donut", "cake", "chair",
+    "couch", "potted plant", "bed", "dining table", "toilet", "tv",
+    "laptop", "mouse", "remote", "keyboard", "cell phone", "microwave",
+    "oven", "toaster", "sink", "refrigerator", "book", "clock", "vase",
+    "scissors", "teddy bear", "hair drier", "toothbrush",
+]
 
 # ── Colors ───────────────────────────────────────────────────────────────────
 
@@ -107,6 +128,31 @@ def load_labels(path):
         return [str(i) for i in range(91)]
 
 
+def nms_filter(detections, iou_threshold=0.45):
+    """Suppress overlapping boxes of the same class (greedy NMS)."""
+    if len(detections) <= 1:
+        return detections
+
+    def iou(a, b):
+        ay0, ax0, ay1, ax1 = a[:4]
+        by0, bx0, by1, bx1 = b[:4]
+        iy0, ix0 = max(ay0, by0), max(ax0, bx0)
+        iy1, ix1 = min(ay1, by1), min(ax1, bx1)
+        inter = max(0, iy1 - iy0) * max(0, ix1 - ix0)
+        area_a = (ay1 - ay0) * (ax1 - ax0)
+        area_b = (by1 - by0) * (bx1 - bx0)
+        union = area_a + area_b - inter
+        return inter / union if union > 0 else 0
+
+    dets = sorted(detections, key=lambda d: d[5], reverse=True)
+    keep = []
+    while dets:
+        best = dets.pop(0)
+        keep.append(best)
+        dets = [d for d in dets if d[4] != best[4] or iou(best, d) < iou_threshold]
+    return keep
+
+
 def make_interpreter(model_path, use_npu=True):
     """Create a TFLite interpreter with optional NPU delegate."""
     delegates = []
@@ -151,9 +197,11 @@ def get_font():
 # ── Object Detector (MobileNet SSD) ─────────────────────────────────────────
 
 class ObjectDetector:
-    """MobileNet SSD v1 — detects 80 COCO object classes on NPU."""
+    """MobileNet SSD — detects 80 COCO object classes on NPU."""
 
-    def __init__(self, model_path=MODEL_DETECT, use_npu=True):
+    def __init__(self, model_path=None, use_npu=True):
+        if model_path is None:
+            model_path = MODELS_DETECT.get("ssd_v2", list(MODELS_DETECT.values())[0])
         if not os.path.exists(model_path):
             raise FileNotFoundError(
                 f"{model_path} not found. Run: scripts/download_models.sh"
@@ -199,7 +247,98 @@ class ObjectDetector:
         for i in range(min(count, len(scores))):
             if scores[i] >= threshold:
                 ymin, xmin, ymax, xmax = boxes[i]
-                results.append((ymin, xmin, ymax, xmax, int(classes[i]), float(scores[i])))
+                results.append((ymin, xmin, ymax, xmax, int(classes[i]) + 1, float(scores[i])))
+        return results, ms
+
+
+# ── YOLOv8 Detector ────────────────────────────────────────────────────────
+
+class YoloDetector:
+    """YOLOv8n — 80-class detector with custom post-processing for NPU.
+
+    Output tensor [1, 84, 2100]:
+      - 84 = 4 box coords (cx, cy, w, h in pixel space) + 80 class scores
+      - 2100 = number of predictions across all grid scales
+    Requires: dequantize int8→float, transpose, box decode, threshold, NMS.
+    """
+
+    def __init__(self, model_path, use_npu=True):
+        if not os.path.exists(model_path):
+            raise FileNotFoundError(f"{model_path} not found")
+        self.interp, self.backend = make_interpreter(model_path, use_npu)
+
+        inp = self.interp.get_input_details()[0]
+        self.input_size = inp["shape"][1]  # 320
+        self.input_idx = inp["index"]
+        self.input_dtype = inp["dtype"]
+        # INT8 quantization params for input
+        self.in_scale = inp["quantization_parameters"]["scales"][0]
+        self.in_zp = inp["quantization_parameters"]["zero_points"][0]
+
+        out = self.interp.get_output_details()[0]
+        self.output_idx = out["index"]
+        self.out_scale = out["quantization_parameters"]["scales"][0]
+        self.out_zp = out["quantization_parameters"]["zero_points"][0]
+
+        # Warmup
+        dummy = np.zeros(inp["shape"], dtype=self.input_dtype)
+        self.interp.set_tensor(self.input_idx, dummy)
+        self.interp.invoke()
+        print(f"  YoloDetector: {self.backend}, {self.input_size}x{self.input_size}")
+
+    def detect(self, rgb_array, threshold=0.5):
+        """Returns (detections, latency_ms). Each detection = (y0,x0,y1,x1,cls,score).
+
+        Note: cls here is a YOLO compact index (0-79). The caller maps via YOLO_CLASSES.
+        Box coords are normalized to [0,1] for compatibility with draw_boxes.
+        """
+        img = Image.fromarray(rgb_array).resize((self.input_size, self.input_size))
+        arr = np.array(img, dtype=np.float32)
+
+        # Quantize input: int8 = float / scale + zero_point
+        input_data = np.clip(arr / self.in_scale + self.in_zp, -128, 127).astype(np.int8)
+        self.interp.set_tensor(self.input_idx, np.expand_dims(input_data, 0))
+
+        t0 = time.monotonic()
+        self.interp.invoke()
+        ms = (time.monotonic() - t0) * 1000.0
+
+        # Dequantize output: float = (int8 - zero_point) * scale
+        raw = self.interp.get_tensor(self.output_idx)  # [1, 84, 2100] int8
+        out = (raw.astype(np.float32) - self.out_zp) * self.out_scale  # [1, 84, 2100]
+        preds = out[0].T  # [2100, 84]
+
+        # Extract boxes (cx, cy, w, h) in pixel coords and class scores
+        cx, cy, w, h = preds[:, 0], preds[:, 1], preds[:, 2], preds[:, 3]
+        class_scores = preds[:, 4:]  # [2100, 80]
+
+        # Best class per prediction
+        class_ids = np.argmax(class_scores, axis=1)
+        confidences = class_scores[np.arange(len(class_ids)), class_ids]
+
+        # Threshold filter
+        mask = confidences >= threshold
+        if not np.any(mask):
+            return [], ms
+
+        cx, cy, w, h = cx[mask], cy[mask], w[mask], h[mask]
+        class_ids = class_ids[mask]
+        confidences = confidences[mask]
+
+        # Convert cx,cy,w,h (pixel) → normalized y0,x0,y1,x1 [0,1]
+        sz = float(self.input_size)
+        x0 = (cx - w / 2) / sz
+        y0 = (cy - h / 2) / sz
+        x1 = (cx + w / 2) / sz
+        y1 = (cy + h / 2) / sz
+
+        results = []
+        for i in range(len(class_ids)):
+            # Use negative class_id to signal YOLO labels (handled in draw_boxes)
+            results.append((
+                float(y0[i]), float(x0[i]), float(y1[i]), float(x1[i]),
+                int(class_ids[i]), float(confidences[i])
+            ))
         return results, ms
 
 
@@ -386,12 +525,15 @@ def main():
     )
     parser.add_argument("--mode", choices=["detect", "pose", "demo"], default="detect",
                         help="detect=objects, pose=skeleton, demo=both (default: detect)")
+    parser.add_argument("--model", choices=list(MODELS_DETECT.keys()), default="ssd_v2",
+                        help="Detection model (default: ssd_v2)")
     parser.add_argument("--cpu", action="store_true", help="CPU-only (for comparison)")
     parser.add_argument("--compare", action="store_true",
                         help="Run BOTH NPU and CPU, show latency comparison on screen")
     parser.add_argument("--threshold", type=float, default=0.5,
                         help="Detection confidence threshold")
     parser.add_argument("--device", default=CAMERA_DEV, help="V4L2 camera device")
+    parser.add_argument("--flip", action="store_true", help="Rotate 180° (camera upside down)")
     parser.add_argument("--no-display", action="store_true", help="Headless mode")
     args = parser.parse_args()
 
@@ -410,17 +552,30 @@ def main():
     detector_cpu = None   # for --compare mode
     pose_cpu = None
 
+    is_yolo = args.model.startswith("yolo")
+    model_path = MODELS_DETECT.get(args.model, list(MODELS_DETECT.values())[0])
+    if not os.path.exists(model_path):
+        print(f"Model {model_path} not found, falling back to ssd_v1")
+        model_path = MODELS_DETECT["ssd_v1"]
+        is_yolo = False
+
     if args.mode in ("detect", "demo"):
-        detector = ObjectDetector(MODEL_DETECT, use_npu=use_npu)
-        if args.compare and use_npu:
-            detector_cpu = ObjectDetector(MODEL_DETECT, use_npu=False)
+        if is_yolo:
+            detector = YoloDetector(model_path, use_npu=use_npu)
+            if args.compare and use_npu:
+                detector_cpu = YoloDetector(model_path, use_npu=False)
+        else:
+            detector = ObjectDetector(model_path, use_npu=use_npu)
+            if args.compare and use_npu:
+                detector_cpu = ObjectDetector(model_path, use_npu=False)
 
     if args.mode in ("pose", "demo"):
         pose = PoseEstimator(MODEL_POSE, use_npu=use_npu)
         if args.compare and use_npu:
             pose_cpu = PoseEstimator(MODEL_POSE, use_npu=False)
 
-    labels = load_labels(LABEL_PATH)
+    # YOLO uses compact 0-79 class IDs; SSD uses COCO category IDs via labelmap.txt
+    labels = YOLO_CLASSES if is_yolo else load_labels(LABEL_PATH)
 
     # ── M7 heartbeat ──
     m7 = M7HeartbeatReader()
@@ -484,6 +639,9 @@ def main():
             if frame is None:
                 continue
 
+            if args.flip:
+                frame = frame[::-1, ::-1]
+
             # ── Run inference ──
             detections = []
             keypoints = None
@@ -494,6 +652,7 @@ def main():
 
             if detector:
                 detections, det_ms = detector.detect(frame, args.threshold)
+                detections = nms_filter(detections)
             if pose:
                 keypoints, pose_ms = pose.estimate(frame)
 
@@ -537,7 +696,7 @@ def main():
                 draw_boxes(draw, detections, labels, WIDTH, HEIGHT)
 
             # ── Info overlay ──
-            info = []
+            info = [f"i.MX8MP EVK | {args.model.upper()} | {args.mode.upper()}"]
             if detector:
                 line = f"Detect: {detector.backend} {det_ms:.1f}ms"
                 if args.compare and det_cpu_ms > 0:
