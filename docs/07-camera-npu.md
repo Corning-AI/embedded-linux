@@ -212,48 +212,125 @@ NXP's Yocto image may ship demo applications we can adapt instead of writing fro
 
 ### Step 8 — Build the detection application
 
-Python script: `/opt/camera-detect/detect_camera.py`
+Source: `app/camera-detect/detect_camera.py`
+Deploy to: `/opt/camera-detect/detect_camera.py` on the EVK
 
-Functionality:
+**Architecture:**
 
-1. Capture frames from OV5640 via V4L2 / GStreamer
-2. Run MobileNet SSD on NPU via TFLite + VX Delegate
-3. Draw bounding boxes, class labels, confidence scores
-4. Overlay performance metrics: FPS, NPU vs CPU latency
-5. Show M7 heartbeat status (from RPMsg)
-6. Display on HDMI via Wayland
+```
+┌─────────────────────────────────────────────────────────┐
+│                  detect_camera.py                        │
+│                                                          │
+│  ┌──────────┐    ┌──────────┐    ┌───────────────────┐  │
+│  │ v4l2src  │───→│ appsink  │───→│ Python processing │  │
+│  │ /video3  │    │ (RGB)    │    │  • resize 300x300 │  │
+│  │ 640x480  │    └──────────┘    │  • TFLite + NPU   │  │
+│  └──────────┘                    │  • draw boxes      │  │
+│                                  │  • overlay FPS     │  │
+│  ┌──────────┐    ┌──────────┐    │  • M7 heartbeat   │  │
+│  │ wayland  │←───│ appsrc   │←───│                   │  │
+│  │ sink     │    │ (RGB)    │    └───────────────────┘  │
+│  │ HDMI J17 │    └──────────┘                           │
+│  └──────────┘                                           │
+└─────────────────────────────────────────────────────────┘
+```
 
-Key dependencies:
+**Key design choices:**
 
-- `tflite_runtime` — inference with VX Delegate
-- GStreamer Python (`gi.repository.Gst`) — camera capture + display
-- `PIL` or `cv2` — drawing overlays
+- **Two GStreamer pipelines**: capture (v4l2src→appsink) and display (appsrc→waylandsink), connected by Python processing loop
+- **PIL for drawing** (not OpenCV — it's not in the image, and PIL is sufficient for boxes + text)
+- **M7 heartbeat**: optional, reads `/dev/ttyRPMSG0` in a background thread
+- **Wayland env vars**: auto-set `XDG_RUNTIME_DIR` and `WAYLAND_DISPLAY` for SSH sessions
+
+**Deploy and run:**
+
+```bash
+# From Windows host:
+scp app/camera-detect/detect_camera.py root@192.168.1.98:/opt/camera-detect/
+
+# On EVK (via SSH):
+export XDG_RUNTIME_DIR=/run/user/0 WAYLAND_DISPLAY=wayland-1
+
+python3 /opt/camera-detect/detect_camera.py              # NPU mode
+python3 /opt/camera-detect/detect_camera.py --cpu        # CPU for comparison
+python3 /opt/camera-detect/detect_camera.py --no-display # headless
+python3 /opt/camera-detect/detect_camera.py --threshold 0.3  # lower confidence
+```
+
+**Dependencies** (all pre-installed in imx-image-multimedia):
+
+| Package | Purpose |
+| ------- | ------- |
+| `tflite_runtime` | Inference engine with VX Delegate (NPU) |
+| `Pillow` (PIL) | Drawing bounding boxes, labels, overlay text |
+| `gi` (GStreamer Python) | Camera capture via V4L2, display via Wayland |
+| `numpy` | Frame data manipulation |
 
 ### Step 9 — Add M7 FreeRTOS heartbeat via RPMsg
 
-On the Ubuntu build host, build the RPMsg echo example:
+Source: `m7-firmware/rpmsg-heartbeat/main_remote.c`
 
-```bash
-cd mcux-sdk-examples/boards/evkmimx8mp/multicore_examples/rpmsg_lite_str_echo_rtos/armgcc
-export ARMGCC_DIR=/opt/arm-gnu-toolchain-13.3.rel1-x86_64-arm-none-eabi
-./build_release.sh
+**How it works:**
+
+The i.MX8MP has a Cortex-M7 coprocessor alongside the A53 Linux cores. They communicate via RPMsg (Remote Processor Messaging) over shared memory:
+
+```
+┌──────────────────┐    RPMsg (VirtIO)    ┌──────────────────┐
+│  Cortex-A53 (×4) │◄══════════════════►│  Cortex-M7       │
+│  Linux 6.6       │  /dev/ttyRPMSG0     │  FreeRTOS        │
+│  detect_camera.py│  ←── "HB:42:5000"   │  heartbeat task  │
+│                  │  ──→ "ping"          │  echo task       │
+└──────────────────┘    MU interrupt      └──────────────────┘
+        │                                          │
+   ┌────┴────┐                              ┌──────┴──────┐
+   │  DRAM   │  shared memory (64 KB)       │    TCM      │
+   │  6 GB   │  @ 0x55800000               │  128 KB     │
+   └─────────┘                              └─────────────┘
 ```
 
-Transfer and load on the EVK:
+**The M7 firmware does:**
+1. Sends `"HB:<counter>:<uptime_ms>"` every 1 second
+2. Echoes back any message received from Linux with `"echo: "` prefix
+
+**Build (on Ubuntu build host):**
 
 ```bash
-cp rpmsg_lite_str_echo_rtos.elf /lib/firmware/
-echo rpmsg_lite_str_echo_rtos.elf > /sys/class/remoteproc/remoteproc0/firmware
+# 1. Get NXP MCUXpresso SDK examples
+git clone https://github.com/nxp-mcuxpresso/mcux-sdk-examples.git
+
+# 2. Copy our modified main_remote.c over the NXP example
+EXAMPLE=mcux-sdk-examples/boards/evkmimx8mp/multicore_examples/rpmsg_lite_str_echo_rtos
+cp m7-firmware/rpmsg-heartbeat/main_remote.c ${EXAMPLE}/main_remote.c
+
+# 3. Build with ARM GCC
+cd ${EXAMPLE}/armgcc
+export ARMGCC_DIR=/opt/arm-gnu-toolchain-13.3.rel1-x86_64-arm-none-eabi
+./build_release.sh
+# Output: release/rpmsg_lite_str_echo_rtos.elf
+```
+
+**Load on the EVK:**
+
+```bash
+# Copy firmware to the board
+scp release/rpmsg_lite_str_echo_rtos.elf root@192.168.1.98:/lib/firmware/rpmsg_heartbeat.elf
+
+# On the EVK:
+echo rpmsg_heartbeat.elf > /sys/class/remoteproc/remoteproc0/firmware
 echo start > /sys/class/remoteproc/remoteproc0/state
 
 # Verify
-cat /sys/class/remoteproc/remoteproc0/state   # should say "running"
-ls /dev/ttyRPMSG*                               # should see ttyRPMSG0
-echo "ping" > /dev/ttyRPMSG0
-cat /dev/ttyRPMSG0                              # should echo back
+cat /sys/class/remoteproc/remoteproc0/state    # → "running"
+ls /dev/ttyRPMSG*                               # → /dev/ttyRPMSG0
+cat /dev/ttyRPMSG0 &                            # → HB:0:1000 HB:1:2000 ...
+echo "ping" > /dev/ttyRPMSG0                    # → "echo: ping"
 ```
 
-The detection application reads M7 status from `/dev/ttyRPMSG0` and displays it on the HDMI overlay.
+**Integration with detection app:**
+
+The detection app automatically checks for `/dev/ttyRPMSG0` at startup. If the M7 firmware is running, it reads heartbeat messages in a background thread and displays `"M7: HB:42:5000"` on the HDMI overlay. If not running, it simply skips the M7 status display.
+
+A helper script `m7-firmware/rpmsg-heartbeat/load_m7.sh` automates loading and testing.
 
 ### Step 10 — Record demo video
 
