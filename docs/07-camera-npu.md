@@ -24,7 +24,7 @@ TFLite + VX Delegate ──→ NPU (MobileNet SSD, INT8)
 Overlay: bounding boxes + labels + FPS + NPU latency
     │
     ▼
-Wayland/Weston ──→ HDMI Display (J7)
+Wayland/Weston ──→ HDMI Display (J17)
 
     ┌──────────────────────────────────────┐
     │  Cortex-M7 (FreeRTOS)               │
@@ -66,7 +66,7 @@ Wayland/Weston ──→ HDMI Display (J7)
 | Item | Connection | Notes |
 | ---- | ---------- | ----- |
 | OV5640 + MINISASTOCSI adapter | J12 (CSI1 MIPI) | Official NXP camera module; mini-SAS cable connection |
-| HDMI display + cable | J7 | Any HDMI monitor |
+| HDMI display + cable | J17 | Any HDMI monitor |
 | Ethernet cable | J10 or J11A | For file transfer (scp, wget) |
 
 ## Step-by-step
@@ -77,7 +77,7 @@ Wayland/Weston ──→ HDMI Display (J7)
 2. Connect OV5640 camera to **J12** (CSI1 MIPI) via MINISASTOCSI adapter
    - Use the mini-SAS cable (included with the MINISASTOCSI kit)
    - Plug into J12 until the latch clicks
-3. Connect HDMI cable from **J7** to display
+3. Connect HDMI cable from **J17** to display
 4. Connect Ethernet cable to **J10**
 5. Power on, login as `root`
 
@@ -85,30 +85,47 @@ Wayland/Weston ──→ HDMI Display (J7)
 
 ```bash
 dmesg | grep -i ov5640
-ls /dev/video*
 v4l2-ctl --list-devices
-v4l2-ctl -d /dev/video0 --list-formats-ext
+v4l2-ctl -d /dev/video3 --list-formats-ext
 ```
 
-Expected output: OV5640 detected on I2C1 (address 0x3c), `/dev/video0` created, supports YUYV/NV12 up to 1920x1080.
+**IMPORTANT:** On i.MX8MP, the video device numbering is:
+
+| Device | Function | Notes |
+| ------ | -------- | ----- |
+| `/dev/video0` | VPU encoder (vsi_v4l2enc) | H.264/HEVC encoding, NOT camera! |
+| `/dev/video1` | VPU decoder (vsi_v4l2dec) | H.264/HEVC decoding |
+| `/dev/video2` | ISI M2M (mxc-isi-m2m_v1) | Color space conversion |
+| `/dev/video3` | **ISI Capture (mxc-isi-cap_v1)** | **This is the camera!** |
+
+Verified output (2026-03-10):
+
+```
+[    0.080573] platform 32e40000.csi: Fixed dependency cycle(s) with /soc@0/bus@30800000/i2c@30a30000/ov5640_mipi@3c
+[    2.633919] ov5640 1-003c: supply DOVDD not found, using dummy regulator
+[    8.525147] mx8-img-md: Registered sensor subdevice: ov5640 1-003c (1)
+[    8.548408] mx8-img-md: created link [ov5640 1-003c] => [mxc-mipi-csi2.0]
+```
+
+OV5640 detected at I2C address 0x3c, linked to MIPI CSI-2 receiver. The "supply not found, using dummy regulator" warnings are normal — the EVK uses fixed regulators not described in the device tree.
 
 If `ov5640_check_chip_id: failed` appears, the camera isn't physically connected or the mini-SAS cable is loose.
 
 ### Step 3 — Test live preview on HDMI
 
 ```bash
-# Camera → HDMI display
-gst-launch-1.0 v4l2src device=/dev/video0 ! \
+# Camera → HDMI display (use /dev/video3, NOT video0!)
+gst-launch-1.0 v4l2src device=/dev/video3 ! \
     video/x-raw,width=640,height=480,framerate=30/1 ! \
     waylandsink
 
 # Alternative: NXP's optimized source element
-gst-launch-1.0 imxv4l2src device=/dev/video0 ! \
+gst-launch-1.0 imxv4l2src device=/dev/video3 ! \
     video/x-raw,width=640,height=480 ! \
     waylandsink
 ```
 
-If Weston is not running: `systemctl start weston@root`
+If Weston is not running: `systemctl start weston.service`
 
 ### Step 4 — Verify NPU stack
 
@@ -128,11 +145,9 @@ ls /usr/bin/tensorflow-lite-*/tools/benchmark_model
 
 ### Step 5 — Get network access and download model
 
-```bash
-# DHCP on eth0
-dhclient eth0 && ip addr show eth0
+WiFi is available via `mlan0` (see [06-wifi-bluetooth.md](06-wifi-bluetooth.md)), or use Ethernet.
 
-# Create directories
+```bash
 mkdir -p /opt/models /opt/camera-detect
 
 # Download MobileNet SSD v1 (COCO dataset, INT8 quantized)
@@ -141,34 +156,49 @@ wget https://storage.googleapis.com/download.tensorflow.org/models/tflite/coco_s
 unzip coco_ssd_mobilenet_v1_1.0_quant_2018_06_29.zip
 ```
 
-If no internet on the board, download on PC and transfer:
+If long URLs get corrupted via serial, download on PC and transfer via WiFi:
 
 ```bash
-scp detect.tflite root@<EVK_IP>:/opt/models/
+# On Windows host:
+scp ssd_model.zip root@192.168.1.98:/opt/models/
+# On EVK:
+cd /opt/models && unzip ssd_model.zip
 ```
+
+Model files: `detect.tflite` (4.2 MB) + `labelmap.txt` (COCO 90 classes).
 
 ### Step 6 — Benchmark NPU vs CPU
 
-```bash
-BENCH=/usr/bin/tensorflow-lite-*/tools/benchmark_model
-MODEL=/opt/models/detect.tflite
+> **Note:** `benchmark_model` is not included in `imx-image-multimedia`. Use Python instead:
 
-# CPU-only inference
-$BENCH --graph=$MODEL --num_runs=50 --warmup_runs=5
+```python
+import time, numpy as np
+import tflite_runtime.interpreter as tflite
 
-# NPU-accelerated inference
-$BENCH --graph=$MODEL \
-    --external_delegate_path=/usr/lib/libvx_delegate.so \
-    --num_runs=50 --warmup_runs=5
+MODEL = "/opt/models/detect.tflite"
+
+# CPU benchmark
+interp_cpu = tflite.Interpreter(model_path=MODEL, num_threads=4)
+interp_cpu.allocate_tensors()
+inp = interp_cpu.get_input_details()
+dummy = np.random.randint(0, 255, size=inp[0]["shape"], dtype=np.uint8)
+# ... warmup + timing loop ...
+
+# NPU benchmark
+delegate = tflite.load_delegate("/usr/lib/libvx_delegate.so")
+interp_npu = tflite.Interpreter(model_path=MODEL, experimental_delegates=[delegate])
+# ... same warmup + timing loop ...
 ```
 
-Expected results:
+Verified results (2026-03-10, MobileNet SSD v1 INT8, 300x300 input):
 
-| Backend | Inference Latency | Notes |
-| ------- | ----------------- | ----- |
-| CPU (A53) | ~180–200 ms | 4 threads |
-| NPU (VX Delegate) | ~8–12 ms | INT8 quantized |
-| Speedup | ~20x | |
+| Backend | Avg Latency | Min | Max | Notes |
+| ------- | ----------- | --- | --- | ----- |
+| CPU (A53 x4, XNNPACK) | **45.3 ms** | 45.2 | 45.5 | NEON SIMD auto-enabled |
+| NPU (VX Delegate) | **9.1 ms** | 8.5 | 9.7 | 1 op fallback to CPU (PostProcess) |
+| Speedup | **5.0x** | | | CPU faster than expected due to XNNPACK |
+
+> **Note:** CPU is faster than initial estimates (~45ms vs ~180ms) because TFLite 2.16's XNNPACK delegate uses ARM NEON SIMD on the A53. The NPU's real advantage is **freeing CPU for other tasks** (camera capture, display, post-processing) in a concurrent pipeline.
 
 ### Step 7 — Check for NXP pre-built demos
 
