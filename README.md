@@ -7,14 +7,9 @@
 
 ## Live Demo — NPU-Accelerated Object Detection
 
-<p align="center">
-  <a href="https://github.com/Corning-AI/embedded-linux/releases/latest">
-    <img src="media/demo-hero.jpg" alt="Real-time edge AI: person 72% + cell phone 80% detected on i.MX8MP NPU at 11ms" width="480">
-  </a>
-</p>
-<p align="center">
-  <strong>Person (72%) + Cell Phone (80%)</strong> detected in real-time on the <strong>NPU</strong> — <a href="https://github.com/Corning-AI/embedded-linux/releases/latest">watch the full 68s demo video</a>
-</p>
+https://github.com/Corning-AI/embedded-linux/raw/main/media/demo.mp4
+
+> 68-second demo: **person**, **cell phone**, **bottle** detected in real-time — **NPU 11ms/frame**, **9 FPS** end-to-end on the 2.3 TOPS NPU
 
 <table>
 <tr>
