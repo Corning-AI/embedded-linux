@@ -6,7 +6,7 @@ Full-stack embedded Linux project on the NXP i.MX 8M Plus EVK — from Yocto BSP
 
 <p align="center">
   <a href="https://github.com/Corning-AI/embedded-linux/releases/latest">
-    <img src="media/demo.gif" alt="Real-time object detection running on i.MX8MP NPU" width="360">
+    <img src="media/demo.gif" alt="Real-time object detection running on i.MX8MP NPU" width="480">
   </a>
 </p>
 
