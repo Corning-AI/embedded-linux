@@ -48,3 +48,17 @@ venv/
 
 # Yocto
 cache/
+
+# ML models (too large for git)
+*.onnx
+*.pt
+*.pth
+*_saved_model/
+*.npy
+
+# Raw video (compressed mp4 is committed; originals go in releases)
+*.MOV
+*.mov
+
+# Datasets
+datasets/
