@@ -25,10 +25,12 @@ The 8MPLUSLPD4-EVK box should contain:
 | J23 | Micro USB (Debug UART) | **The most important connector for bring-up.** On-board FTDI enumerates as 4 serial ports. |
 | J21 | 40-pin expansion header | RPi-style GPIO header — used for sensors. |
 | J11 | USB 3.0 Type-A | External USB devices. |
-| J7 | HDMI | Display output (via adapter board). |
+| J17 | HDMI | Display output (HDMI 2.0a). |
 | J10 | GbE RJ45 (1) | Ethernet port 1. |
 | J11A | GbE RJ45 (2) | Ethernet port 2 (with TSN). |
-| J801 | MIPI CSI | Camera input (needs MINISASTOCSI adapter board). |
+| J12 | CSI1 MIPI | Camera input 1 (mini-SAS, needs MINISASTOCSI adapter). |
+| J13 | CSI2 MIPI | Camera input 2 (mini-SAS, second camera slot). |
+| J10 | M.2 Key-E (Wi-Fi/BT) | AW-CM276NF (88W8997) on PCIE-UART carrier board. |
 | J3 | MicroSD card slot (bottom) | Boot from the SD card you've flashed. |
 | SW4 | Boot Mode DIP switch | Selects the boot source (see table below). |
 | SW3 | Power ON/OFF | Main power switch (slide to ON). |
@@ -168,7 +170,7 @@ I2C address: `0x3C`.
 
 ### OV5640 Camera Module
 
-Connected to J801 through the MINISASTOCSI adapter board.
+Connected to **J12** (CSI1 MIPI) or **J13** (CSI2 MIPI) through the MINISASTOCSI adapter board and mini-SAS cable. Use J12 by default (matches the default device tree).
 
 ## Wiring Overview
 
@@ -184,8 +186,8 @@ EVK J21 40-pin Header
 │ ...                                                          │
 └──────────────────────────────────────────────────────────────┘
 
-EVK J801 (MIPI CSI)
-└──→ MINISASTOCSI adapter ──→ OV5640 camera
+EVK J12 (CSI1 MIPI) — mini-SAS connector
+└──→ mini-SAS cable ──→ MINISASTOCSI adapter ──→ OV5640 camera
 ```
 
 ## Pre-Power-On Checklist
@@ -256,7 +258,7 @@ eth1: <NO-CARRIER> mtu 1500  MAC 00:04:9f:09:74:e0  state DOWN   ← DWMAC (J11A
 can0: state DOWN                                                   ← CAN bus
 ```
 
-Both Ethernet interfaces detected but no cable connected (state DOWN). No on-board Wi-Fi/BT — use Ethernet cable or USB Wi-Fi adapter.
+Both Ethernet interfaces detected but no cable connected (state DOWN). **Wi-Fi/BT module present** — see [06-wifi-bluetooth.md](06-wifi-bluetooth.md) for setup.
 
 ### I2C Buses
 
@@ -278,6 +280,55 @@ Hardware-to-Linux bus mapping:
 | HDMI DDC | `i2c-6` | — | HDMI EDID (automatic) |
 
 > **Note:** I2C2 (`i2c-1`) is currently managed by Linux. When the M7 core takes over for FreeRTOS, this bus must be disabled in the Linux device tree to avoid bus contention.
+
+### Phase 2 Readiness (2026-03-09)
+
+```bash
+$ uname -a
+Linux imx8mpevk 6.6.52-lts-next-g5a0a5e71d2bd #1 SMP PREEMPT aarch64 GNU/Linux
+
+$ ls /lib/modules/$(uname -r)/
+kernel/ modules.alias modules.builtin modules.dep modules.order updates/ ...
+
+$ which i2cdetect i2cdump i2cget i2cset
+/usr/sbin/i2cdetect
+/usr/sbin/i2cdump
+/usr/sbin/i2cget
+/usr/sbin/i2cset
+
+$ i2cdetect -y 2    (I2C3 bus scan)
+     0  1  2  3  4  5  6  7  8  9  a  b  c  d  e  f
+00:                         -- -- -- -- -- -- -- --
+10: -- -- -- -- -- -- -- -- -- -- UU -- -- -- -- --
+20: UU -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+30: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+40: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+50: 50 -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+60: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+70: -- -- -- -- -- -- -- --
+
+$ cat /sys/class/remoteproc/remoteproc0/state
+offline
+```
+
+I2C3 bus devices already present on the EVK:
+
+| Address | Device | Status |
+| ------- | ------ | ------ |
+| 0x1a | WM8960 audio codec | `UU` (kernel driver bound) |
+| 0x20 | PCA9535 GPIO expander | `UU` (kernel driver bound) |
+| 0x50 | EEPROM | Unbound (available for raw access) |
+
+All I2C tools available. Kernel module directory intact. Remoteproc offline and ready for M7 firmware loading.
+
+### Available Sensors On Hand
+
+| Sensor | Type | I2C Address | Planned Use |
+| ------ | ---- | ----------- | ----------- |
+| ADXL345 | 3-axis accelerometer | 0x53 or 0x1D | Phase 2 stand-in for BME280 (I2C driver practice) |
+| SSD1306 | 0.96" OLED display | 0x3C | Phase 3 — M7 FreeRTOS local display |
+
+> **Note:** BME280 and MPU6050 are on order. ADXL345 can be used to prototype the Phase 2 I2C kernel driver workflow while waiting for parts. Female-to-female jumper wires are needed to connect modules to J21.
 
 ## Next Step
 
