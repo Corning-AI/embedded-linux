@@ -1,144 +1,173 @@
 #!/usr/bin/env python3
-"""Generate a tech-themed wallpaper for i.MX8MP EVK desktop.
-Reflects: FPGA, Embedded Linux, Power Electronics, Engineering dreams.
+"""Apple-authentic dark wallpaper for i.MX8MP EVK — v10.
+Dr. Ning Kang — Research Fellow, NTU Singapore.
+Color: Apple system dark (#000000–#1C1C1E) + accent blue #0A84FF.
+Nearly pure black background — premium comes from restraint, not color.
+Top area clean for sensor data overlay.
 """
 
 import math
 import random
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
 W, H = 1920, 1080
-random.seed(42)  # reproducible
 
 img = Image.new("RGB", (W, H))
+pixels = img.load()
+
+# ================================================================
+# BACKGROUND: Apple dark mode — near-black with barely visible depth
+# Not colored. Not warm. Not cold. Just dark with subtle dimension.
+# ================================================================
+for y in range(H):
+    for x in range(W):
+        nx, ny = x / W, y / H
+
+        # Base: Apple systemBackground dark (#000000 to #1C1C1E range)
+        # Subtle radial vignette: slightly lighter center, darker edges
+        cx, cy = 0.5, 0.55
+        dist = math.sqrt((nx - cx) ** 2 + ((ny - cy) * 0.8) ** 2)
+        vignette = max(0, 1 - dist * 1.2)
+
+        # Very subtle elevation: just enough to not be flat pure black
+        base = 4 + int(18 * vignette)  # ranges from 4 to 22
+
+        # Barely perceptible cool undertone (Apple's dark has slight blue)
+        r = base
+        g = base
+        b = base + int(3 * vignette)  # +3 max blue, barely noticeable
+
+        pixels[x, y] = (r, g, b)
+
+img = img.filter(ImageFilter.GaussianBlur(radius=3))
+pixels = img.load()
+
+# Subtle noise (prevents banding on dark gradients — critical for quality)
+random.seed(42)
+for _ in range(80000):
+    x = random.randint(0, W - 1)
+    y = random.randint(0, H - 1)
+    r, g, b = pixels[x, y]
+    n = random.randint(-2, 2)
+    pixels[x, y] = (max(0, r + n), max(0, g + n), max(0, b + n))
+
 draw = ImageDraw.Draw(img)
 
-# --- Dark gradient background (deep navy to dark teal) ---
-for y in range(H):
-    r = int(8 + 12 * (y / H))
-    g = int(15 + 25 * (y / H))
-    b = int(30 + 35 * (y / H))
-    draw.line([(0, y), (W, y)], fill=(r, g, b))
-
-# --- Circuit trace grid pattern ---
-trace_color = (30, 55, 80)
-dot_color = (50, 90, 130)
-
-# horizontal traces
-for y in range(60, H, 80):
-    jitter = random.randint(-2, 2)
-    segments = random.randint(2, 5)
-    x_points = sorted(random.sample(range(100, W - 100), segments * 2))
-    for i in range(0, len(x_points) - 1, 2):
-        draw.line([(x_points[i], y + jitter), (x_points[i + 1], y + jitter)],
-                  fill=trace_color, width=1)
-
-# vertical traces
-for x in range(80, W, 100):
-    jitter = random.randint(-2, 2)
-    segments = random.randint(2, 4)
-    y_points = sorted(random.sample(range(80, H - 80), segments * 2))
-    for i in range(0, len(y_points) - 1, 2):
-        draw.line([(x + jitter, y_points[i]), (x + jitter, y_points[i + 1])],
-                  fill=trace_color, width=1)
-
-# via dots at some intersections
-for _ in range(120):
-    x = random.randint(80, W - 80)
-    y = random.randint(60, H - 60)
-    r = random.choice([2, 3])
-    draw.ellipse([x - r, y - r, x + r, y + r], fill=dot_color)
-    draw.ellipse([x - r - 2, y - r - 2, x + r + 2, y + r + 2], outline=trace_color)
-
-# --- Glowing accent circles (like IC pads) ---
-for _ in range(8):
-    cx = random.randint(200, W - 200)
-    cy = random.randint(150, H - 150)
-    for radius in range(25, 0, -1):
-        alpha = int(5 * (25 - radius) / 25)
-        c = (20 + alpha * 3, 60 + alpha * 4, 100 + alpha * 5)
-        draw.ellipse([cx - radius, cy - radius, cx + radius, cy + radius], outline=c)
-
-# --- Waveform (sine wave - represents signals/power electronics) ---
-wave_y_center = H // 2 + 50
-for phase_offset, color, amp in [
-    (0, (0, 180, 220, 80), 40),
-    (math.pi / 3, (0, 220, 180, 60), 30),
-    (math.pi * 2 / 3, (100, 200, 255, 50), 25),
-]:
-    points = []
-    for x in range(0, W, 2):
-        y = wave_y_center + int(amp * math.sin(x * 0.008 + phase_offset))
-        points.append((x, y))
-    for i in range(len(points) - 1):
-        draw.line([points[i], points[i + 1]], fill=color[:3], width=1)
-
-# --- Binary rain (subtle, matrix-style but tasteful) ---
-binary_font_size = 11
+# ================================================================
+# FONTS — Segoe UI Light (closest to SF Pro on Windows)
+# ================================================================
 try:
-    small_font = ImageFont.truetype("consola.ttf", binary_font_size)
-except:
-    small_font = ImageFont.load_default()
+    f_hero = ImageFont.truetype("segoeuil.ttf", 62)
+    f_title = ImageFont.truetype("segoeuil.ttf", 22)
+    f_body = ImageFont.truetype("segoeui.ttf", 15)
+    f_small = ImageFont.truetype("segoeui.ttf", 13)
+    f_tiny = ImageFont.truetype("segoeui.ttf", 11)
+except OSError:
+    f_hero = ImageFont.truetype("arial.ttf", 62)
+    f_title = ImageFont.truetype("arial.ttf", 22)
+    f_body = ImageFont.truetype("arial.ttf", 15)
+    f_small = ImageFont.truetype("arial.ttf", 13)
+    f_tiny = ImageFont.truetype("arial.ttf", 11)
 
-for _ in range(200):
-    x = random.randint(0, W)
-    y = random.randint(0, H)
-    bit = random.choice(["0", "1"])
-    brightness = random.randint(20, 45)
-    draw.text((x, y), bit, fill=(0, brightness, brightness + 10), font=small_font)
+# Apple dark mode text colors (official)
+WHITE = (255, 255, 255)                  # primary text
+SECONDARY = (152, 152, 157)              # gray1 — secondary text
+TERTIARY = (99, 99, 102)                 # gray2 — tertiary
+QUATERNARY = (72, 72, 74)                # gray3 — quaternary
+ACCENT_BLUE = (10, 132, 255)             # Apple system blue (dark)
+ACCENT_TEAL = (100, 210, 255)            # Apple teal (dark)
+ACCENT_INDIGO = (94, 92, 230)            # Apple indigo (dark)
 
-# --- Main title text ---
-try:
-    title_font = ImageFont.truetype("consola.ttf", 42)
-    sub_font = ImageFont.truetype("consola.ttf", 20)
-    quote_font = ImageFont.truetype("consola.ttf", 16)
-    tag_font = ImageFont.truetype("consola.ttf", 14)
-except:
-    title_font = ImageFont.load_default()
-    sub_font = title_font
-    quote_font = title_font
-    tag_font = title_font
+# ================================================================
+# BOTTOM SECTION: Name + info (bottom 28%)
+# ================================================================
 
-# Title block (bottom-right area)
-tx, ty = W - 620, H - 280
+# Subtle separator line at 72% height
+sep_y = int(H * 0.72)
+sep_margin = 400
+for sx in range(sep_margin, W - sep_margin):
+    progress = (sx - sep_margin) / (W - 2 * sep_margin)
+    a = int(20 * math.sin(progress * math.pi))
+    pr, pg, pb = pixels[sx, sep_y]
+    pixels[sx, sep_y] = (pr + a, pg + a, pb + a)
+draw = ImageDraw.Draw(img)
 
-# Subtle background box
-for yy in range(ty - 20, ty + 230):
-    for xx in range(tx - 30, tx + 580):
-        if 0 <= xx < W and 0 <= yy < H:
-            pr, pg, pb = img.getpixel((xx, yy))
-            img.putpixel((xx, yy), (pr // 2, pg // 2, pb // 2))
+# --- Hero name ---
+name = "Dr. Ning Kang"
+name_bbox = draw.textbbox((0, 0), name, font=f_hero)
+name_w = name_bbox[2] - name_bbox[0]
+name_x = (W - name_w) // 2
+name_y = int(H * 0.76)
+draw.text((name_x, name_y), name, fill=WHITE, font=f_hero)
 
-# Accent line
-draw.line([(tx - 20, ty), (tx + 560, ty)], fill=(0, 180, 220), width=2)
+# --- Title (Apple secondary gray) ---
+title = "Research Fellow  |  NTU Singapore"
+t_bbox = draw.textbbox((0, 0), title, font=f_title)
+t_x = (W - (t_bbox[2] - t_bbox[0])) // 2
+t_y = name_y + 72
+draw.text((t_x, t_y), title, fill=SECONDARY, font=f_title)
 
-draw.text((tx, ty + 15), "i.MX8MP EVK", fill=(0, 200, 240), font=title_font)
-draw.text((tx, ty + 65), "Embedded Linux  |  NPU  |  FPGA", fill=(120, 180, 210), font=sub_font)
-draw.text((tx, ty + 95), "Power Electronics  |  Motor Control", fill=(120, 180, 210), font=sub_font)
-
-# Inspirational quote
-draw.text((tx, ty + 140), '"The best way to predict the future', fill=(80, 140, 170), font=quote_font)
-draw.text((tx, ty + 160), ' is to engineer it."', fill=(80, 140, 170), font=quote_font)
-
-# Tag line
-draw.text((tx, ty + 195), "NTU M266  //  PhD  //  Senior Firmware Engineer", fill=(60, 110, 140), font=tag_font)
-
-# --- Top-left system info area ---
-lx, ly = 40, 30
-draw.text((lx, ly), "// SYSTEM", fill=(0, 150, 180), font=sub_font)
-info_lines = [
-    "SoC     : NXP i.MX8M Plus (Cortex-A53 + M7 + NPU)",
-    "Kernel  : Linux 6.6.52-lts",
-    "GPU     : Vivante GC7000UL",
-    "NPU     : 2.3 TOPS INT8",
-    "WiFi/BT : NXP 88W8997 (PCIe + UART)",
-    "Camera  : OV5640 MIPI-CSI2",
+# --- Keywords with Apple accent colors ---
+# Use centered dot-separated keywords with color highlights
+kw_y = t_y + 40
+kw_parts = [
+    ("Wireless Power Transfer", SECONDARY),
+    ("  ·  ", QUATERNARY),
+    ("FPGA", SECONDARY),
+    ("  ·  ", QUATERNARY),
+    ("Embedded Linux", SECONDARY),
+    ("  ·  ", QUATERNARY),
+    ("Power Electronics", SECONDARY),
 ]
-for i, line in enumerate(info_lines):
-    draw.text((lx, ly + 30 + i * 22), line, fill=(50, 100, 130), font=tag_font)
 
-# --- Save ---
-out_path = r"c:\Users\corni\OneDrive - Nanyang Technological University\ntu_rf\M266_EmbeddedLinux\scripts\evk_wallpaper.png"
-img.save(out_path, "PNG")
-print(f"Wallpaper saved: {out_path}")
-print(f"Size: {W}x{H}")
+# Calculate total width
+total_kw_w = sum(draw.textlength(text, font=f_body) for text, _ in kw_parts)
+kw_x = (W - total_kw_w) / 2
+for text, color in kw_parts:
+    draw.text((kw_x, kw_y), text, fill=color, font=f_body)
+    kw_x += draw.textlength(text, font=f_body)
+
+# --- Stats ---
+st_y = kw_y + 26
+st_parts = [
+    ("PhD (SJTU)", TERTIARY),
+    ("  ·  ", QUATERNARY),
+    ("200+ Citations", TERTIARY),
+    ("  ·  ", QUATERNARY),
+    ("7 IEEE Papers", TERTIARY),
+]
+total_st_w = sum(draw.textlength(t, font=f_small) for t, _ in st_parts)
+st_x = (W - total_st_w) / 2
+for text, color in st_parts:
+    draw.text((st_x, st_y), text, fill=color, font=f_small)
+    st_x += draw.textlength(text, font=f_small)
+
+# ================================================================
+# TOP-LEFT: System specs (Apple quaternary — barely visible)
+# ================================================================
+draw.text((60, 36), "i.MX8MP EVK", fill=SECONDARY, font=f_body)
+draw.text((60, 58), "Linux 6.6.52  ·  NPU 2.3 TOPS  ·  WiFi  ·  BT 5.4", fill=TERTIARY, font=f_small)
+
+# ================================================================
+# TOP-RIGHT: Sensor area label
+# ================================================================
+sa = "// SENSOR DATA"
+sa_bbox = draw.textbbox((0, 0), sa, font=f_small)
+draw.text((W - 60 - (sa_bbox[2] - sa_bbox[0]), 36), sa, fill=QUATERNARY, font=f_small)
+
+# ================================================================
+# BOTTOM-RIGHT: GitHub
+# ================================================================
+gh = "github.com/Corning-AI/embedded-linux"
+gh_bbox = draw.textbbox((0, 0), gh, font=f_tiny)
+draw.text((W - 60 - (gh_bbox[2] - gh_bbox[0]), H - 32), gh, fill=(42, 42, 44), font=f_tiny)
+
+# ================================================================
+# Save
+# ================================================================
+out = r"c:\Users\corni\OneDrive - Nanyang Technological University\ntu_rf\M266_EmbeddedLinux\scripts\evk_wallpaper.png"
+img.save(out, "PNG", optimize=False)
+
+import os
+print(f"Saved: {out}")
+print(f"Resolution: {W}x{H}, Size: {os.path.getsize(out) / 1024:.0f} KB")
