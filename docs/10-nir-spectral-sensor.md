@@ -152,6 +152,15 @@ Each virtual register access requires polling the status register for readiness.
 - `scripts/as7263_monitor.py` — Data acquisition script (raw I2C, no dependencies)
 - `docs/as7263_cold_test.png` — Cold stimulus test charts
 
+## Known Issues
+
+**Signal jitter in TOI curve:** The raw TOI plot shows noticeable sample-to-sample fluctuation (~±0.005). Two main causes:
+
+1. **Contact pressure variation** — hand-held measurement means small movements change the optical path and reflection angle, causing readout fluctuation
+2. **ADC quantization noise** — the AS7263 outputs calibrated IEEE754 floats, but the underlying ADC is 16-bit. On weaker channels like W_860, quantization steps become visible in the ratio calculation
+
+Mitigation: apply a 3–5 point moving average to smooth the curve, or use a mechanical fixture to stabilize sensor-skin contact.
+
 ## Next Steps
 
 - [ ] White-paper calibration to normalize LED spectral profile
