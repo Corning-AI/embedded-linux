@@ -48,16 +48,34 @@ kernel-modules/
 ├── chardev/               Character device with file_operations, ioctl, mutex
 └── bme280/                I2C client driver with sysfs + device tree matching
 drivers/v4l2-capture/      V4L2 multi-planar mmap capture (C)
+scripts/as7263_display.py  NIR tissue monitor dashboard (GTK3 + Cairo, real-time)
+scripts/as7263_monitor.py  NIR spectral sensor data logger (raw I2C, no dependencies)
 dts/                       Device tree overlay for OV5640 camera pipeline
-debug/                     6 real debug cases from bring-up (with root cause)
+debug/                     Real debug cases from bring-up (with root cause)
 scripts/                   Yocto build helper, serial file transfer
-docs/                      Hardware guide, BSP build, WiFi/BT, camera+NPU docs
+docs/                      Hardware guide, BSP build, WiFi/BT, camera+NPU, NIR sensor
+```
+
+## NIR Tissue Monitor
+
+<p align="center">
+  <img src="media/nir-demo.gif" alt="AS7263 NIR real-time tissue monitor on HDMI" width="480">
+</p>
+
+Real-time NIR spectral monitoring for cold therapy safety. AS7263 6-channel sensor (610–860 nm) reads tissue reflectance through on-board LED illumination, calculates a tissue oxygenation index (TOI), and displays live trends on HDMI via a full-screen GTK3 dashboard.
+
+Tested with ice-pack cold stimulus on forearm skin — sensor detects vasoconstriction (S_680 drops 10%) and reactive hyperemia during rewarming (W_860 drops 17% as oxygen consumption surges). See [docs/10-nir-spectral-sensor.md](docs/10-nir-spectral-sensor.md) for full data.
+
+```bash
+# Run NIR dashboard on EVK (sensor on J21, LED auto-enabled)
+python3 /opt/as7263_display.py
 ```
 
 ## Hardware
 
 - NXP i.MX 8M Plus EVK (quad A53 + M7 + 2.3 TOPS NPU, 6 GB LPDDR4)
 - OV5640 MIPI CSI-2 camera on J12
+- AS7263 NIR spectral sensor on J21 (I2C3, 0x49)
 - HDMI output on J17, Weston/Wayland
 - AzureWave AW-CM276NF WiFi/BT (NXP 88W8997, PCIe + UART)
 - Kernel 6.6.52-lts, Yocto Scarthgap
@@ -118,6 +136,7 @@ Issues hit during bring-up, documented with root cause:
 - [x] V4L2 capture (C) + device tree overlay
 - [x] WiFi (PCIe) + Bluetooth (UART)
 - [x] Real-time detection: camera → NPU 11ms → overlay → HDMI
+- [x] NIR spectral sensor: AS7263 bring-up, tissue monitoring, cold stimulus test
 - [ ] FreeRTOS on M7 + RPMsg
 
 ## License
