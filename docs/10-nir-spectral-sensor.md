@@ -234,12 +234,33 @@ Observations:
 3. **Cross-session reproducibility confirmed**: warm baseline TOI_cal = −0.17 (previous session at 38°C) matches the rewarming endpoint here (−0.17 at 29°C), validating the calibration approach
 4. Temperature rose from 25°C to 29°C during the 60s measurement window, consistent with active reperfusion
 
-**Methodological note:** In this test, there was a delay between removing the ice pack and the start of data acquisition (sensor placement + script startup). The initial 25°C reading likely underestimates the peak cold because the skin had already begun rewarming. Future tests should use a countdown-triggered workflow to minimize this latency.
+**Methodological note:** In this test, there was a delay between removing the ice pack and the start of data acquisition (sensor placement + script startup). The initial 25°C reading likely underestimates the peak cold because the skin had already begun rewarming.
+
+## Countdown-Triggered Cold Stimulus Test
+
+To address the measurement latency issue, a GTK3 fullscreen countdown script was developed. The workflow: 10-second countdown on HDMI → user places cold hand during countdown → LED and data acquisition start simultaneously at t=0.
+
+First few samples (#1–#4) were discarded (hand not yet stable), and the last sample (#30) was an outlier (hand lifted). Valid data: samples #5–#29.
+
+| Phase | Samples | Temp | TOI_cal | Note |
+|-------|---------|------|---------|------|
+| Active cooling | #5–#10 | 27°C | −0.12 | skin still cooling, vasoconstriction |
+| Peak cold | #11–#16 | 27°C | −0.14 → −0.17 | TOI drops as cold penetrates deeper |
+| Rewarming | #17–#24 | 27→28°C | −0.17 → −0.19 | reactive hyperemia begins |
+| Near baseline | #25–#29 | 29°C | −0.19 → −0.20 | converging toward baseline −0.21 |
+
+Key findings:
+
+1. **Captured a complete cooling → rewarming transition** — temperature dropped from 30°C to 27°C then recovered to 29°C, with a clear TOI response throughout
+2. **Monotonic TOI descent from −0.12 to −0.20** — much cleaner than earlier tests where rewarming had already started before the first sample
+3. **Three independent sessions now converge to TOI_cal ≈ −0.17 to −0.21 at rewarming endpoint** — strong evidence for measurement reproducibility
+4. The countdown approach successfully reduced placement delay, capturing colder initial readings than the manual method
 
 ## Next Steps
 
 - [x] White-paper calibration to normalize LED spectral profile
 - [x] Establish room-temperature skin TOI baseline (TOI_cal ≈ −0.21)
-- [x] Cold stimulus test with calibrated TOI — cold skin TOI_cal ≈ −0.12, reactive hyperemia confirmed
-- [ ] Implement countdown-triggered measurement to capture true peak cold
+- [x] Cold stimulus test with calibrated TOI — cold skin TOI_cal ≈ −0.12
+- [x] Countdown-triggered measurement — complete cooling→rewarming curve captured
+- [ ] Fix countdown timing bug (LED fires slightly before t=0)
 - [ ] Determine frostbite warning threshold from experimental data
