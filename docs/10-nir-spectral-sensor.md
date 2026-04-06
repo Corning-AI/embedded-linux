@@ -450,6 +450,70 @@ Valid for λ = 690–832 nm, age 1–50 years. **Not applicable to other body si
 
 Ref: Duncan A. et al. (1995), *Phys Med Biol* 40(2):295-304; Scholkmann F. & Wolf M. (2013), *J Biomed Opt* 18(10):105004; van der Zee P. et al. (1992), *Adv Exp Med Biol* 316:143-153; Essenpreis M. et al. (1993), *Applied Optics* 32(4):418-425.
 
+## Kernel Customization for BLE HID
+
+### Motivation
+
+Wanted to use Logitech MX Master 3S (mouse) and MX Keys (keyboard) via Bluetooth with the EVK's Weston desktop, enabling direct interaction with the GTK3 dashboard.
+
+### Kernel Config Changes
+
+Analyzed the existing `.config` — most BLE infrastructure was already present. Only 3 options were missing:
+
+```
+CONFIG_UHID=y                  # BLE HID-over-GATT (HOGP)
+CONFIG_HID_LOGITECH_HIDPP=m    # Logitech HID++ protocol for MX series
+CONFIG_INPUT_MOUSEDEV=y        # /dev/input/mice device node
+```
+
+Applied via Yocto `do_configure:append` in a custom layer (`meta-custom`), since NXP's `linux-imx` recipe doesn't merge `.cfg` fragments through the standard `kernel-yocto` mechanism:
+
+```bash
+# meta-custom/recipes-kernel/linux/linux-imx_%.bbappend
+do_configure:append() {
+    ${S}/scripts/config --file ${B}/.config --enable UHID
+    ${S}/scripts/config --file ${B}/.config --module HID_LOGITECH_HIDPP
+    ${S}/scripts/config --file ${B}/.config --enable INPUT_MOUSEDEV
+    oe_runmake -C ${S} O=${B} olddefconfig
+}
+```
+
+Kernel Image replaced on the existing SD card — no full reflash needed, all WiFi config, DTB patches, scripts, and wallpaper preserved.
+
+### USB Input — Working
+
+Logitech Bolt receiver (046d:c548) was plug-and-play after kernel update:
+
+```
+Bus 001 Device 002: ID 046d:c548 Logitech, Inc. Logi Bolt Receiver
+Input: Logitech USB Receiver Mouse → /dev/input/event3 (mouse0)
+```
+
+Key learning: Bolt receiver stores pairing internally — pair on any PC via Logi Options+, then move the receiver to the target device.
+
+### BLE Pairing — NXP Firmware Limitation
+
+Both MX Master 3S and MX Keys were detected via `hcitool lescan`, and L2CAP connections established. However, SMP pairing consistently failed:
+
+```
+Bluetooth: hci0: security requested but not available
+```
+
+Root cause: the NXP 88W8997 Bluetooth firmware does not fully implement BLE Secure Connections. All kernel crypto is present (`CRYPTO_ECDH=y`, `CRYPTO_CMAC=y`, `BT_LE=y`), but the firmware rejects SMP security requests. Workaround: use USB Bolt/Unifying receivers.
+
+### Self-Screenshot via Cairo
+
+Weston's `weston-screenshooter` requires special permissions that couldn't be configured reliably. The GTK3 dashboard was modified to capture its own rendering:
+
+```python
+surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, w, h)
+cr = cairo.Context(surface)
+self.on_draw(self.da, cr)
+surface.write_to_png("/tmp/dashboard_screenshot.png")
+```
+
+Screenshots auto-saved every 5 seconds, pulled via SCP for remote analysis — a visual feedback loop without physical access to the HDMI display.
+
 ## Next Steps
 
 - [x] White-paper calibration to normalize LED spectral profile
@@ -459,5 +523,8 @@ Ref: Duncan A. et al. (1995), *Phys Med Biol* 40(2):295-304; Scholkmann F. & Wol
 - [x] Countdown bug fix + mild vs strong cold comparison
 - [x] DPF correction — StO2 now in physiologically meaningful range (0.24–0.43)
 - [x] Determine frostbite warning threshold from experimental data
+- [x] Kernel rebuild for BLE HID (UHID + HIDPP + MOUSEDEV)
+- [x] USB Bolt receiver — mouse and keyboard working
+- [ ] BLE direct pairing — blocked by NXP firmware SMP limitation
 - [ ] Integrate StO2 + warning levels into real-time display scripts
 - [ ] Water cooling system integration with continuous monitoring
