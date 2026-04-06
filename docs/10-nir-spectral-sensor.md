@@ -152,6 +152,33 @@ Each virtual register access requires polling the status register for readiness.
 - `scripts/as7263_monitor.py` — Data acquisition script (raw I2C, no dependencies)
 - `docs/as7263_cold_test.png` — Cold stimulus test charts
 
+## White Reference Calibration
+
+Before skin measurements, a white paper reference was taken to characterize the LED spectral profile. White paper has roughly uniform reflectance across 610–860 nm, so white-paper readings primarily reflect the LED's own spectral shape rather than sample properties. Dividing skin readings by this reference yields normalized tissue reflectance, removing the LED spectral bias.
+
+Method: sensor face-down on standard A4 white paper, LED 100mA, 10 samples collected, last 6 averaged for stability.
+
+| Channel | Wavelength | White Ref (µW/cm²) |
+|---------|-----------|---------------------|
+| R | 610 nm | 3449 |
+| S | 680 nm | 938 |
+| T | 730 nm | 231 |
+| U | 760 nm | 165 |
+| V | 810 nm | 249 |
+| W | 860 nm | 193 |
+
+The R:S:W ratio of 18:5:1 confirms severe LED spectral non-uniformity — this is why raw TOI is always negative.
+
+**Calibrated TOI example** (warm skin baseline):
+
+```
+S_norm = 2780 / 938 = 2.96
+W_norm = 405 / 193 = 2.10
+TOI_cal = (2.10 - 2.96) / (2.10 + 2.96) = -0.170
+```
+
+After calibration, TOI shifts from −0.745 to −0.170, much closer to physiologically meaningful values.
+
 ## Known Issues
 
 **Signal jitter in TOI curve:** The raw TOI plot shows noticeable sample-to-sample fluctuation (~±0.005). Two main causes:
@@ -161,9 +188,36 @@ Each virtual register access requires polling the status register for readiness.
 
 Mitigation: apply a 3–5 point moving average to smooth the curve, or use a mechanical fixture to stabilize sensor-skin contact.
 
+## Calibrated Skin Baseline
+
+With the white reference established, skin readings can be normalized to remove LED spectral bias:
+
+```
+normalized_reflectance = skin_reading / white_reference
+```
+
+Forearm skin at room temperature, LED 100mA, 15 samples averaged:
+
+| Metric | Raw | Calibrated | Note |
+|--------|-----|------------|------|
+| S_680 normalized | 2268 µW/cm² | 2.42 | skin / white_ref(938) |
+| W_860 normalized | 302 µW/cm² | 1.56 | skin / white_ref(193) |
+| TOI (raw) | −0.766 | — | dominated by LED spectral bias |
+| TOI (calibrated) | — | **−0.215** | physiologically meaningful |
+| Temperature | 31–32°C | | |
+
+Observations:
+
+1. Calibration shifted TOI by +0.55 (from −0.77 to −0.21), confirming that LED non-uniformity was the dominant factor in raw readings
+2. TOI_cal stability across 15 samples: −0.19 to −0.22 (±0.015), good repeatability
+3. Compared to the previous warm-hand session (38°C, TOI_cal = −0.17), today's baseline is slightly lower (32°C, TOI_cal = −0.21) — cooler skin means less blood flow, consistent with physiology
+4. This establishes the room-temperature skin baseline at **TOI_cal ≈ −0.21** for future cold stimulus comparison
+
+The calibration step is standard practice in diffuse reflectance spectroscopy — without it, the raw TOI is an artifact of the light source, not the tissue. The fact that calibrated values track skin temperature across sessions validates the measurement approach.
+
 ## Next Steps
 
-- [ ] White-paper calibration to normalize LED spectral profile
-- [ ] Establish room-temperature skin TOI baseline
-- [ ] Monitor TOI in real-time during extended cold application
+- [x] White-paper calibration to normalize LED spectral profile
+- [x] Establish room-temperature skin TOI baseline (TOI_cal ≈ −0.21)
+- [ ] Cold stimulus test with calibrated TOI — compare against baseline
 - [ ] Determine frostbite warning threshold from experimental data
