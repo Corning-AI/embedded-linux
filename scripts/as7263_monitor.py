@@ -18,6 +18,7 @@ Ning Kang, 2026-03-10
 
 import os
 import time
+import math
 import struct
 import fcntl
 
@@ -69,7 +70,19 @@ CAL_REGS = {
 }
 
 SENSORTYPE_AS7263 = 0x3F
-TOI_WARNING = 0.3
+
+# White reference values (A4 paper, LED 100mA, 6-point average)
+WREF = {'R': 3449, 'S': 938, 'T': 231, 'U': 165, 'V': 249, 'W': 193}
+
+# DPF values for fingertip (Essenpreis 1993, Scholkmann & Wolf 2013)
+DPF_680 = 3.0   # fingertip, 680nm
+DPF_860 = 2.5   # fingertip, 860nm
+
+# Frostbite warning thresholds (from 5-session experimental data)
+# Direction: vasoconstriction → TOI_cal RISES toward zero → DANGER
+# Based on severe cold test (25°C start, near tissue damage limit)
+TOI_CAL_WARNING = -0.15   # mild vasoconstriction begins
+TOI_CAL_DANGER  = -0.12   # near-frostbite (subject reported unbearable cold)
 
 
 def virtual_read(bus, reg):
@@ -134,7 +147,7 @@ def main():
         virtual_write(bus, INT_T, 50)  # 积分时间 = 2.8ms x 50 = 140ms
         print("[CONFIG] gain=64x, integration=140ms, one-shot mode")
 
-        print("\nSample,R_610,S_680,T_730,U_760,V_810,W_860,Temp,TOI,Warning")
+        print("\nSample,R_610,S_680,T_730,U_760,V_810,W_860,Temp,TOI_raw,TOI_cal,StO2,Warning")
 
         n = 0
         while True:
@@ -147,15 +160,32 @@ def main():
             ch = {k: read_calibrated(bus, v) for k, v in CAL_REGS.items()}
             temp = virtual_read(bus, DEVICE_TEMP)
 
-            # TOI = (W_860 - S_680) / (W_860 + S_680)
+            # Raw TOI
             s, w = ch['S'], ch['W']
-            toi = (w - s) / (w + s) if (w + s) > 0 else 0
-            warning = "LOW!" if toi < TOI_WARNING else "OK"
+            toi_raw = (w - s) / (w + s) if (w + s) > 0 else 0
+
+            # White-reference calibrated TOI
+            sn = s / WREF['S']
+            wn = w / WREF['W']
+            toi_cal = (wn - sn) / (wn + sn) if (wn + sn) > 0 else 0
+
+            # DPF-corrected StO2 (fingertip)
+            a_s = abs(math.log(WREF['S'] / s)) / DPF_680 if s > 0 else 0
+            a_w = abs(math.log(WREF['W'] / w)) / DPF_860 if w > 0 else 0
+            sto2 = a_w / (a_w + a_s) if (a_w + a_s) > 0 else 0
+
+            # Three-level frostbite warning
+            if toi_cal > TOI_CAL_DANGER:
+                warning = "DANGER"
+            elif toi_cal > TOI_CAL_WARNING:
+                warning = "WARNING"
+            else:
+                warning = "SAFE"
 
             n += 1
             print(f"{n},{ch['R']:.2f},{ch['S']:.2f},{ch['T']:.2f},"
                   f"{ch['U']:.2f},{ch['V']:.2f},{ch['W']:.2f},"
-                  f"{temp},{toi:.4f},{warning}")
+                  f"{temp},{toi_raw:.4f},{toi_cal:.4f},{sto2:.3f},{warning}")
 
             time.sleep(2)
     except KeyboardInterrupt:

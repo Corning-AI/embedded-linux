@@ -12,6 +12,7 @@ Usage: python3 as7263_countdown.py [countdown_seconds] [num_samples]
 import os
 import sys
 import time
+import math
 import struct
 import fcntl
 import signal
@@ -33,6 +34,15 @@ I2C_SLAVE = 0x0703
 ADDR = 0x49
 CALS = {'R': 0x14, 'S': 0x18, 'T': 0x1C, 'U': 0x20, 'V': 0x24, 'W': 0x28}
 WREF = {'R': 3449, 'S': 938, 'T': 231, 'U': 165, 'V': 249, 'W': 193}
+
+# DPF values for fingertip
+DPF_680 = 3.0
+DPF_860 = 2.5
+
+# Frostbite warning thresholds (TOI_cal rises toward zero = danger)
+TOI_CAL_WARNING = -0.15
+TOI_CAL_DANGER  = -0.12
+
 LABELS = {
     'R': ('610nm', (1.0, 0.3, 0.3)),
     'S': ('680nm', (1.0, 0.5, 0.2)),
@@ -103,6 +113,8 @@ class CountdownApp(Gtk.Window):
         self.temp = 0
         self.toi_raw = 0
         self.toi_cal = 0
+        self.sto2 = 0
+        self.warning_level = "SAFE"
         self.sample_num = 0
         self.error = ""
         self.lock = threading.Lock()
@@ -155,18 +167,33 @@ class CountdownApp(Gtk.Window):
                     wn = w / WREF['W']
                     toi_cal = (wn - sn) / (wn + sn) if (wn + sn) > 0 else 0
 
+                    # DPF-corrected StO2 (fingertip)
+                    a_s = abs(math.log(WREF['S'] / s)) / DPF_680 if s > 0 else 0
+                    a_w = abs(math.log(WREF['W'] / w)) / DPF_860 if w > 0 else 0
+                    sto2 = a_w / (a_w + a_s) if (a_w + a_s) > 0 else 0
+
+                    # Three-level warning
+                    if toi_cal > TOI_CAL_DANGER:
+                        wlevel = "DANGER"
+                    elif toi_cal > TOI_CAL_WARNING:
+                        wlevel = "WARNING"
+                    else:
+                        wlevel = "SAFE"
+
                     with self.lock:
                         self.current = ch
                         self.temp = temp
                         self.toi_raw = toi_raw
                         self.toi_cal = toi_cal
+                        self.sto2 = sto2
+                        self.warning_level = wlevel
                         self.sample_num = n
-                        self.samples.append((n, temp, toi_raw, toi_cal, ch['S'], ch['W']))
+                        self.samples.append((n, temp, toi_raw, toi_cal, sto2, ch['S'], ch['W']))
                         self.error = ""
 
                     print(f"{n},{ch['R']:.0f},{ch['S']:.0f},{ch['T']:.0f},"
                           f"{ch['U']:.0f},{ch['V']:.0f},{ch['W']:.0f},"
-                          f"{temp},{toi_raw:.4f},{toi_cal:.4f}")
+                          f"{temp},{toi_raw:.4f},{toi_cal:.4f},{sto2:.3f},{wlevel}")
 
                 except OSError as e:
                     with self.lock:
@@ -199,15 +226,17 @@ class CountdownApp(Gtk.Window):
             temp = self.temp
             toi_cal = self.toi_cal
             toi_raw = self.toi_raw
+            sto2 = self.sto2
+            wlevel = self.warning_level
             sn = self.sample_num
             err = self.error
 
         if phase == 'countdown':
             self._draw_countdown(cr, w, h, cd)
         elif phase == 'measuring':
-            self._draw_live(cr, w, h, samples, ch, temp, toi_cal, toi_raw, sn, err)
+            self._draw_live(cr, w, h, samples, ch, temp, toi_cal, toi_raw, sto2, wlevel, sn, err)
         else:
-            self._draw_live(cr, w, h, samples, ch, temp, toi_cal, toi_raw, sn, err)
+            self._draw_live(cr, w, h, samples, ch, temp, toi_cal, toi_raw, sto2, wlevel, sn, err)
             cr.set_font_size(32)
             cr.set_source_rgb(0.2, 1.0, 0.4)
             cr.move_to(w // 2 - 150, h - 30)
@@ -244,7 +273,7 @@ class CountdownApp(Gtk.Window):
         cr.move_to(20, 40)
         cr.show_text("AS7263 NIR Tissue Monitor — Countdown Mode")
 
-    def _draw_live(self, cr, w, h, samples, ch, temp, toi_cal, toi_raw, sn, err):
+    def _draw_live(self, cr, w, h, samples, ch, temp, toi_cal, toi_raw, sto2, wlevel, sn, err):
         cr.select_font_face("Liberation Sans", 0, 1)
 
         # Title bar
@@ -259,29 +288,44 @@ class CountdownApp(Gtk.Window):
             cr.move_to(20, 60)
             cr.show_text(f"I2C ERROR: {err}")
 
-        # Left: TOI + Temp
+        # Left: Warning + StO2 + Temp
         cr.set_font_size(16)
         cr.set_source_rgb(0.6, 0.6, 0.7)
-        cr.move_to(30, 80)
-        cr.show_text("Temperature")
-        cr.set_font_size(56)
-        cr.set_source_rgb(1.0, 0.5, 0.2) if temp > 35 else cr.set_source_rgb(0.3, 0.8, 1.0)
-        cr.move_to(30, 140)
-        cr.show_text(f"{temp} C")
+        cr.move_to(30, 75)
+        cr.show_text("Frostbite Risk")
+        cr.set_font_size(36)
+        if wlevel == "DANGER":
+            cr.set_source_rgb(1.0, 0.2, 0.2)
+        elif wlevel == "WARNING":
+            cr.set_source_rgb(1.0, 0.8, 0.2)
+        else:
+            cr.set_source_rgb(0.2, 1.0, 0.4)
+        cr.move_to(30, 112)
+        cr.show_text(wlevel)
 
         cr.set_font_size(16)
         cr.set_source_rgb(0.6, 0.6, 0.7)
-        cr.move_to(30, 175)
-        cr.show_text("TOI (calibrated)")
-        cr.set_font_size(56)
-        cr.set_source_rgb(0.2, 1.0, 0.4) if toi_cal > -0.2 else cr.set_source_rgb(1.0, 0.8, 0.2)
-        cr.move_to(30, 235)
-        cr.show_text(f"{toi_cal:.4f}")
+        cr.move_to(30, 140)
+        cr.show_text("StO2 (fingertip DPF)")
+        cr.set_font_size(48)
+        if wlevel == "DANGER":
+            cr.set_source_rgb(1.0, 0.2, 0.2)
+        elif wlevel == "WARNING":
+            cr.set_source_rgb(1.0, 0.8, 0.2)
+        else:
+            cr.set_source_rgb(0.2, 1.0, 0.4)
+        cr.move_to(30, 192)
+        cr.show_text(f"{sto2:.1%}")
+
+        cr.set_font_size(20)
+        cr.set_source_rgb(1.0, 0.5, 0.2) if temp > 35 else cr.set_source_rgb(0.3, 0.8, 1.0)
+        cr.move_to(30, 225)
+        cr.show_text(f"Temp: {temp} C")
 
         cr.set_font_size(13)
         cr.set_source_rgb(0.4, 0.4, 0.5)
-        cr.move_to(30, 260)
-        cr.show_text(f"raw: {toi_raw:.4f}  |  baseline: -0.210")
+        cr.move_to(30, 248)
+        cr.show_text(f"TOI_raw: {toi_raw:.4f}  |  TOI_cal: {toi_cal:.4f}  |  baseline: -0.210")
 
         # Channel bars
         cr.set_font_size(14)
@@ -327,15 +371,15 @@ class CountdownApp(Gtk.Window):
         cr.set_font_size(14)
         cr.set_source_rgb(0.7, 0.7, 0.8)
         cr.move_to(chart_x + 10, chart_y + 20)
-        cr.show_text("TOI_cal Trend (real-time)")
+        cr.show_text("StO2 Trend — DPF corrected (real-time)")
 
         if len(samples) >= 2:
-            toi_vals = [s[3] for s in samples]
-            v_min = min(toi_vals) - 0.02
-            v_max = max(toi_vals) + 0.02
-            # Also show baseline
-            v_min = min(v_min, -0.23)
-            v_max = max(v_max, -0.10)
+            sto2_vals = [s[4] for s in samples]
+            v_min = min(sto2_vals) - 0.03
+            v_max = max(sto2_vals) + 0.03
+            # Ensure range covers baseline (~0.38) and danger zone (~0.43)
+            v_min = min(v_min, 0.20)
+            v_max = max(v_max, 0.50)
 
             margin = 55
             px = chart_x + margin
@@ -357,24 +401,36 @@ class CountdownApp(Gtk.Window):
                 cr.move_to(chart_x + 3, gy + 4)
                 cr.show_text(f"{val:.3f}")
 
-            # Baseline line
-            bl_y = py + (1 - (-0.210 - v_min) / (v_max - v_min)) * ph
-            cr.set_source_rgba(1.0, 0.4, 0.2, 0.6)
+            # Baseline line (StO2 = 0.38)
+            bl_y = py + (1 - (0.38 - v_min) / (v_max - v_min)) * ph
+            cr.set_source_rgba(0.3, 0.8, 1.0, 0.6)
             cr.set_line_width(1.5)
             cr.set_dash([8, 4])
             cr.move_to(px, bl_y)
             cr.line_to(px + pw, bl_y)
             cr.stroke()
+            cr.set_font_size(11)
+            cr.move_to(px + pw - 130, bl_y - 5)
+            cr.show_text("baseline StO2=0.38")
+
+            # Danger line (StO2 = 0.43)
+            dl_y = py + (1 - (0.43 - v_min) / (v_max - v_min)) * ph
+            cr.set_source_rgba(1.0, 0.2, 0.2, 0.6)
+            cr.set_line_width(1.5)
+            cr.set_dash([8, 4])
+            cr.move_to(px, dl_y)
+            cr.line_to(px + pw, dl_y)
+            cr.stroke()
             cr.set_dash([])
             cr.set_font_size(11)
-            cr.move_to(px + pw - 120, bl_y - 5)
-            cr.show_text("baseline -0.210")
+            cr.move_to(px + pw - 130, dl_y - 5)
+            cr.show_text("DANGER StO2>0.43")
 
-            # TOI line
+            # StO2 line
             cr.set_source_rgb(0.0, 1.0, 0.5)
             cr.set_line_width(2.5)
-            for i, val in enumerate(toi_vals):
-                x = px + (i / max(len(toi_vals) - 1, 1)) * pw
+            for i, val in enumerate(sto2_vals):
+                x = px + (i / max(len(sto2_vals) - 1, 1)) * pw
                 y = py + (1 - (val - v_min) / (v_max - v_min)) * ph
                 if i == 0:
                     cr.move_to(x, y)
@@ -382,11 +438,16 @@ class CountdownApp(Gtk.Window):
                     cr.line_to(x, y)
             cr.stroke()
 
-            # Dots
-            cr.set_source_rgb(0.0, 1.0, 0.5)
-            for i, val in enumerate(toi_vals):
-                x = px + (i / max(len(toi_vals) - 1, 1)) * pw
+            # Dots with warning colors
+            for i, val in enumerate(sto2_vals):
+                x = px + (i / max(len(sto2_vals) - 1, 1)) * pw
                 y = py + (1 - (val - v_min) / (v_max - v_min)) * ph
+                if val > 0.43:
+                    cr.set_source_rgb(1.0, 0.2, 0.2)
+                elif val > 0.40:
+                    cr.set_source_rgb(1.0, 0.8, 0.2)
+                else:
+                    cr.set_source_rgb(0.0, 1.0, 0.5)
                 cr.arc(x, y, 3, 0, 6.28)
                 cr.fill()
 

@@ -353,6 +353,103 @@ This is why clinical NIRS protocols always specify the measurement site. The sam
 
 Ref: Duncan A. et al. (1995), *Phys Med Biol* 40(2):295-304; Scholkmann F. & Wolf M. (2013), "General equation for the DPF of the adult head, neonatal head, adult forearm, and adult leg", *J Biomed Opt* 18(10):105004.
 
+## Frostbite Warning Threshold
+
+### Threshold Definition
+
+Based on 5 independent cold stimulus sessions, the **strongest cold exposure** (ice pack until skin was barely tolerable, starting temperature 25°C) is used as the "near-frostbite" reference point. At this intensity, the subject reported the sensation as approaching the pain/tissue-damage boundary.
+
+**Key data from the near-frostbite session (calibrated cold stimulus test, 25°C start):**
+
+| Metric | Value | Meaning |
+|--------|-------|---------|
+| Skin temperature | 25°C | Severe cold, approaching tissue damage |
+| TOI_cal (peak cold) | **−0.118** | Maximum vasoconstriction observed |
+| StO2 (fingertip DPF) | **0.43** | Tissue-level oxygenation during severe cold |
+
+**Important: the direction is counterintuitive.** In this reflectance-mode system, vasoconstriction reduces total blood volume, and Hb (680nm) drops proportionally more than HbO2 (860nm), so TOI_cal **rises** (becomes less negative) during cold exposure. The danger signal is TOI_cal moving **toward zero**, not away from it.
+
+### Three-Level Warning System
+
+| Level | TOI_cal Range | StO2 (fingertip) | Skin Temp | Action |
+|-------|--------------|-------------------|-----------|--------|
+| **SAFE** (green) | < −0.15 | < 0.40 | > 28°C | Normal perfusion, continue cooling |
+| **WARNING** (yellow) | −0.15 to −0.12 | 0.40 to 0.43 | 25–28°C | Significant vasoconstriction, monitor closely |
+| **DANGER** (red) | > −0.12 | > 0.43 | < 25°C | Near-frostbite, **stop cooling immediately** |
+
+### Threshold Derivation
+
+The thresholds are derived from the five-session dataset:
+
+| Session | Start Temp | Peak TOI_cal | Endpoint TOI_cal | Severity |
+|---------|-----------|--------------|------------------|----------|
+| Warm baseline | 32°C | −0.21 | −0.21 | None |
+| Cold test 1 (manual) | 28°C | ~−0.15 | −0.17 | Mild |
+| Cold test 2 (calibrated) | **25°C** | **−0.118** | −0.173 | **Severe** |
+| Cold test 3 (countdown) | 27°C | −0.12 | −0.20 | Moderate |
+| Cold test 4 (mild) | 30°C | −0.14 | −0.17 | Mild |
+
+The WARNING threshold (−0.15) is set at the point where mild cold starts — all mild exposures peaked near this value. The DANGER threshold (−0.12) is set at the peak of the severe exposure where tissue damage risk begins. Values beyond −0.12 have not been tested (would require prolonged exposure beyond ethical limits).
+
+### Reactive Hyperemia as a Secondary Indicator
+
+After removing the cold stimulus, healthy tissue exhibits **reactive hyperemia** — a surge of blood reperfusing the tissue, causing a temporary StO2 dip to ~0.24 (TOI_cal ~−0.20). This is actually a **good sign**: it means the microcirculation is intact.
+
+If reactive hyperemia is **absent** after cold removal (StO2 stays flat instead of dipping), it would suggest microvascular damage — a more serious frostbite indicator. This has not been observed in our experiments (all sessions showed clear reactive hyperemia), but it would be the critical warning in a clinical deployment.
+
+## DPF Reference Table — Human Body Sites
+
+Differential Pathlength Factor (DPF) values vary significantly across body sites due to differences in tissue thickness, scattering properties, and blood vessel density. **Using the wrong site's DPF can compress or mask real physiological changes**, making it critical to match the DPF to the actual measurement location.
+
+### DPF Values by Body Site and Wavelength
+
+| Body Site | DPF @ ~690nm | DPF @ ~830–860nm | DPF Ratio (short/long) | StO2 Sensitivity | Source |
+|-----------|-------------|-------------------|------------------------|------------------|--------|
+| **Adult Forehead** | 6.51 | 5.38–5.42 | **1.20–1.21** | High | Duncan 1995; Scholkmann & Wolf 2013 |
+| **Adult Head (temporal)** | 6.26 | 5.13 | **1.22** | High | Duncan 1995 |
+| **Neonatal Head** | 5.38 | 4.53 | **1.19** | High | Duncan 1995 |
+| **Adult Calf** | 5.51 | 4.74 | **1.16** | Medium | Duncan 1995; van der Zee 1992 |
+| **Adult Thigh** | ~5.0–5.5 | ~4.3–4.8 | **~1.16** | Medium | Extrapolated from calf |
+| **Adult Forearm** | 4.16 | 3.59 | **1.16** | Medium | Duncan 1995; van der Zee 1992 |
+| **Fingertip** | ~3.0 | ~2.5 | **1.20** | High | Essenpreis 1993 (estimated, thin tissue) |
+| **Thenar (palm)** | ~3.5–4.0 | ~3.0–3.5 | **~1.15** | Medium | Limited published data |
+
+### Why the DPF Ratio Matters More Than Absolute DPF
+
+The absolute DPF values affect the magnitude of computed absorbance, but the **DPF ratio** (short wavelength / long wavelength) determines how much the scattering correction amplifies or compresses the physiological signal:
+
+```
+Higher DPF ratio → stronger scattering correction → wider StO2 dynamic range → better sensitivity
+```
+
+**Our experimental verification:**
+
+| Site | DPF Ratio | StO2 Range (cold→warm) | Can Distinguish Cold/Warm? |
+|------|-----------|------------------------|---------------------------|
+| Forearm (DPF 6.51/5.86) | 1.11 | 0.36–0.39 | **No** — compressed, nearly flat |
+| Fingertip (DPF 3.0/2.5) | 1.20 | 0.24–0.43 | **Yes** — 19 pp dynamic range |
+
+This is why clinical NIRS devices always specify the measurement site in their operating protocol. The same person at the same moment can show 10–20 percentage points difference in StO2 between fingertip and forearm, purely due to tissue geometry.
+
+### Scholkmann & Wolf 2013 General Equation (Forehead Only)
+
+For the adult forehead, DPF can be computed as a function of wavelength (λ, nm) and age (A, years):
+
+```
+DPF(λ, A) = 223.3 + 0.05624 × A^0.8493 − 5.723×10⁻⁷ × λ³ + 0.001245 × λ² − 0.9025 × λ
+```
+
+Valid for λ = 690–832 nm, age 1–50 years. **Not applicable to other body sites.**
+
+### Caveats
+
+1. **Fingertip and thenar data are sparse** — most rigorous DPF measurements used phase-resolved or time-resolved instruments on head, forearm, and calf
+2. **DPF depends on source-detector separation** — literature values assume 3–4 cm spacing; compact sensors like AS7263 (< 5 mm) sample more superficial tissue, potentially lowering effective DPF
+3. **DPF varies with age, adipose thickness, and skin pigmentation** — the table values are population averages from predominantly Caucasian cohorts
+4. **For compact reflectance sensors**: many pulse oximetry papers fold DPF into an empirical calibration constant rather than using literature values directly
+
+Ref: Duncan A. et al. (1995), *Phys Med Biol* 40(2):295-304; Scholkmann F. & Wolf M. (2013), *J Biomed Opt* 18(10):105004; van der Zee P. et al. (1992), *Adv Exp Med Biol* 316:143-153; Essenpreis M. et al. (1993), *Applied Optics* 32(4):418-425.
+
 ## Next Steps
 
 - [x] White-paper calibration to normalize LED spectral profile
@@ -360,5 +457,7 @@ Ref: Duncan A. et al. (1995), *Phys Med Biol* 40(2):295-304; Scholkmann F. & Wol
 - [x] Cold stimulus test with calibrated TOI — cold skin TOI_cal ≈ −0.12
 - [x] Countdown-triggered measurement — complete cooling→rewarming curve captured
 - [x] Countdown bug fix + mild vs strong cold comparison
-- [x] DPF correction — StO2 now in physiologically meaningful range (0.36–0.39)
-- [ ] Determine frostbite warning threshold from experimental data
+- [x] DPF correction — StO2 now in physiologically meaningful range (0.24–0.43)
+- [x] Determine frostbite warning threshold from experimental data
+- [ ] Integrate StO2 + warning levels into real-time display scripts
+- [ ] Water cooling system integration with continuous monitoring

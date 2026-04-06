@@ -13,6 +13,7 @@ import math
 import struct
 import fcntl
 import threading
+
 import gi
 gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk, GLib
@@ -29,6 +30,17 @@ LABELS = {
     'V': ('810nm', (0.3, 0.7, 1.0)),
     'W': ('860nm', (0.2, 0.9, 0.5)),
 }
+
+# White reference (A4 paper, LED 100mA)
+WREF = {'R': 3449, 'S': 938, 'T': 231, 'U': 165, 'V': 249, 'W': 193}
+
+# DPF values for fingertip
+DPF_680 = 3.0
+DPF_860 = 2.5
+
+# Frostbite warning thresholds (TOI_cal rises toward zero = danger)
+TOI_CAL_WARNING = -0.15
+TOI_CAL_DANGER  = -0.12
 
 class I2CBus:
     def __init__(self, bus_num):
@@ -92,7 +104,12 @@ class Dashboard(Gtk.Window):
         self.channels = {k: 0.0 for k in CALS}
         self.temp = 0
         self.toi = 0.0
+        self.toi_cal = 0.0
+        self.sto2 = 0.0
+        self.warning_level = "SAFE"
         self.toi_history = []
+        self.toi_cal_history = []
+        self.sto2_history = []
         self.temp_history = []
         self.ch_history = {k: [] for k in CALS}  # all 6 channels
         self.sample_count = 0
@@ -146,17 +163,42 @@ class Dashboard(Gtk.Window):
                     s, w = ch['S'], ch['W']
                     toi = (w - s) / (w + s) if (w + s) > 0 else 0
 
+                    # White-reference calibrated TOI
+                    sn = s / WREF['S']
+                    wn = w / WREF['W']
+                    toi_cal = (wn - sn) / (wn + sn) if (wn + sn) > 0 else 0
+
+                    # DPF-corrected StO2 (fingertip)
+                    a_s = abs(math.log(WREF['S'] / s)) / DPF_680 if s > 0 else 0
+                    a_w = abs(math.log(WREF['W'] / w)) / DPF_860 if w > 0 else 0
+                    sto2 = a_w / (a_w + a_s) if (a_w + a_s) > 0 else 0
+
+                    # Three-level warning
+                    if toi_cal > TOI_CAL_DANGER:
+                        wlevel = "DANGER"
+                    elif toi_cal > TOI_CAL_WARNING:
+                        wlevel = "WARNING"
+                    else:
+                        wlevel = "SAFE"
+
                     with self.lock:
                         self.channels = ch
                         self.temp = temp
                         self.toi = toi
+                        self.toi_cal = toi_cal
+                        self.sto2 = sto2
+                        self.warning_level = wlevel
                         self.sample_count += 1
                         self.toi_history.append(toi)
+                        self.toi_cal_history.append(toi_cal)
+                        self.sto2_history.append(sto2)
                         self.temp_history.append(temp)
                         for k in CALS:
                             self.ch_history[k].append(ch[k])
                         if len(self.toi_history) > 600:
                             self.toi_history.pop(0)
+                            self.toi_cal_history.pop(0)
+                            self.sto2_history.pop(0)
                             self.temp_history.pop(0)
                             for k in CALS:
                                 self.ch_history[k].pop(0)
@@ -183,7 +225,12 @@ class Dashboard(Gtk.Window):
             ch = dict(self.channels)
             temp = self.temp
             toi = self.toi
+            toi_cal = self.toi_cal
+            sto2 = self.sto2
+            wlevel = self.warning_level
             history = list(self.toi_history)
+            toi_cal_hist = list(self.toi_cal_history)
+            sto2_hist = list(self.sto2_history)
             temp_hist = list(self.temp_history)
             ch_hist = {k: list(v) for k, v in self.ch_history.items()}
             count = self.sample_count
@@ -260,43 +307,53 @@ class Dashboard(Gtk.Window):
             cr.move_to(panel_x + 300, y + 20)
             cr.show_text(f"{val:.0f}")
 
-        # --- Center panel: TOI & Temperature ---
+        # --- Center panel: StO2 + Warning + Temperature ---
         cx = 400
         cy = 80
 
-        # Temperature
+        # Warning banner
         cr.set_font_size(16)
         cr.set_source_rgb(0.7, 0.7, 0.8)
         cr.move_to(cx, cy + 15)
-        cr.show_text("Chip Temperature")
-        cr.set_font_size(48)
-        if temp > 35:
-            cr.set_source_rgb(1.0, 0.5, 0.2)
-        else:
-            cr.set_source_rgb(0.3, 0.8, 1.0)
-        cr.move_to(cx, cy + 70)
-        cr.show_text(f"{temp} C")
-
-        # TOI
-        cr.set_font_size(16)
-        cr.set_source_rgb(0.7, 0.7, 0.8)
-        cr.move_to(cx, cy + 110)
-        cr.show_text("Tissue Oxygenation Index (TOI)")
-        cr.set_font_size(48)
-        if toi > -0.5:
-            cr.set_source_rgb(0.2, 1.0, 0.4)
-        elif toi > -0.75:
+        cr.show_text("Frostbite Risk")
+        cr.set_font_size(42)
+        if wlevel == "DANGER":
+            cr.set_source_rgb(1.0, 0.2, 0.2)
+        elif wlevel == "WARNING":
             cr.set_source_rgb(1.0, 0.8, 0.2)
         else:
-            cr.set_source_rgb(1.0, 0.3, 0.2)
-        cr.move_to(cx, cy + 165)
-        cr.show_text(f"{toi:.4f}")
+            cr.set_source_rgb(0.2, 1.0, 0.4)
+        cr.move_to(cx, cy + 60)
+        cr.show_text(wlevel)
 
-        # Formula
-        cr.set_font_size(13)
-        cr.set_source_rgb(0.4, 0.4, 0.5)
-        cr.move_to(cx, cy + 190)
-        cr.show_text("TOI = (W_860 - S_680) / (W_860 + S_680)")
+        # StO2 (DPF-corrected)
+        cr.set_font_size(16)
+        cr.set_source_rgb(0.7, 0.7, 0.8)
+        cr.move_to(cx, cy + 90)
+        cr.show_text("Tissue O2 Saturation (StO2, fingertip DPF)")
+        cr.set_font_size(48)
+        if wlevel == "DANGER":
+            cr.set_source_rgb(1.0, 0.2, 0.2)
+        elif wlevel == "WARNING":
+            cr.set_source_rgb(1.0, 0.8, 0.2)
+        else:
+            cr.set_source_rgb(0.2, 1.0, 0.4)
+        cr.move_to(cx, cy + 145)
+        cr.show_text(f"{sto2:.1%}")
+
+        # Temperature + TOI details
+        cr.set_font_size(16)
+        cr.set_source_rgb(0.7, 0.7, 0.8)
+        cr.move_to(cx, cy + 175)
+        cr.show_text("Details")
+        cr.set_font_size(20)
+        cr.set_source_rgb(1.0, 0.5, 0.2) if temp > 35 else cr.set_source_rgb(0.3, 0.8, 1.0)
+        cr.move_to(cx, cy + 200)
+        cr.show_text(f"Temp: {temp} C")
+        cr.set_font_size(15)
+        cr.set_source_rgb(0.5, 0.5, 0.6)
+        cr.move_to(cx, cy + 222)
+        cr.show_text(f"TOI_raw: {toi:.4f}  |  TOI_cal: {toi_cal:.4f}  |  baseline: -0.210")
 
         # --- Helper: draw a multi-line chart ---
         def draw_chart(cx, cy, cw, ch_h, title, series, y_fmt=".3f"):
@@ -379,10 +436,13 @@ class Dashboard(Gtk.Window):
             # Normalize temp to TOI scale for overlay
             toi_series.append(("Temp", (1.0, 0.4, 0.2), temp_hist))
 
-        # Draw TOI-only chart (clean)
+        # Draw StO2 + TOI_cal chart
+        sto2_series = []
+        if sto2_hist:
+            sto2_series.append(("StO2", (0.0, 1.0, 0.5), sto2_hist))
         draw_chart(20, chart_y, half_w, chart_h,
-                   "TOI Trend (last 20 min)",
-                   [("TOI", (0.0, 1.0, 0.5), history)],
+                   "StO2 Trend — DPF corrected (last 20 min)",
+                   sto2_series if sto2_series else [("TOI_cal", (0.0, 1.0, 0.5), toi_cal_hist)],
                    y_fmt=".3f")
 
         # Right chart: Key spectral channels
