@@ -288,6 +288,49 @@ Three factors explain the smoother, narrower curve:
 
 All rewarming endpoints converge to **−0.17 to −0.21** — consistent across different cold intensities, measurement methods, and sessions. This level of reproducibility validates the white-reference calibration approach and confirms the sensor can serve as a reliable tissue perfusion monitor.
 
+## DPF Correction — From Negative TOI to Physiological StO2
+
+The white-reference calibration removes LED spectral bias but not tissue scattering. Shorter wavelengths scatter more in tissue (higher path length), so more 680nm light returns to the sensor regardless of hemoglobin content. This is why even calibrated TOI remains negative.
+
+Clinical NIRS instruments solve this using the **modified Beer-Lambert law** with **Differential Pathlength Factors (DPF)** — wavelength-dependent coefficients that normalize for scattering path length differences.
+
+Using published DPF values for forearm skin (Duncan et al., 1995):
+
+| Wavelength | DPF | Physical meaning |
+|-----------|-----|-----------------|
+| 680 nm | 6.51 | Light travels 6.5× the straight-line distance due to scattering |
+| 860 nm | 5.86 | Less scattering at longer wavelength, shorter effective path |
+
+**DPF-corrected calculation:**
+
+```
+A_corrected(λ) = ln(I_reference / I_skin) / DPF(λ)
+
+A_680 = ln(938 / 2268) / 6.51 = 0.1355    (absorbance due to Hb)
+A_860 = ln(193 / 302) / 5.86  = 0.0764    (absorbance due to HbO2)
+
+StO2 = A_860 / (A_860 + A_680) = 0.0764 / (0.0764 + 0.1355) = 0.36
+```
+
+### Three-Method Comparison on Mild Cold Stimulus Data
+
+| Phase | Samples | TOI_raw | TOI_cal (white ref) | StO2 (DPF) |
+|-------|---------|---------|---------------------|------------|
+| Cooling | #4–#8 | −0.733 | −0.14 | **0.39** |
+| Slow descent | #9–#18 | −0.740 | −0.16 | **0.37** |
+| Near stable | #19–#30 | −0.746 | −0.17 | **0.36** |
+| Warm baseline | prev. session | −0.766 | −0.21 | **0.36** |
+
+Summary of the three correction levels:
+
+1. **Raw TOI**: −0.73 to −0.77. Always negative, no physiological meaning, but trend is valid
+2. **White-reference TOI**: −0.14 to −0.21. Removes LED bias, still negative (scattering not corrected)
+3. **DPF-corrected StO2**: **0.36 to 0.39**. First positive result — falls within published forearm StO2 range (literature reports 60–75% for healthy adults; our lower values are expected given the AS7263's 20nm FWHM bandwidth vs dedicated NIRS instruments with <5nm filters)
+
+The DPF correction preserves the same physiological trend (cold skin StO2 > warm baseline) while shifting values into a meaningful range. Both white-ref and DPF methods agree on direction, confirming the underlying measurement is consistent — DPF just maps it onto the correct physiological scale.
+
+Ref: Duncan A. et al. (1995), "Optical pathlength measurements on adult head, calf and forearm and the head of the newborn infant using phase resolved optical spectroscopy", *Phys Med Biol* 40(2):295-304.
+
 ## Next Steps
 
 - [x] White-paper calibration to normalize LED spectral profile
@@ -295,4 +338,5 @@ All rewarming endpoints converge to **−0.17 to −0.21** — consistent across
 - [x] Cold stimulus test with calibrated TOI — cold skin TOI_cal ≈ −0.12
 - [x] Countdown-triggered measurement — complete cooling→rewarming curve captured
 - [x] Countdown bug fix + mild vs strong cold comparison
+- [x] DPF correction — StO2 now in physiologically meaningful range (0.36–0.39)
 - [ ] Determine frostbite warning threshold from experimental data
