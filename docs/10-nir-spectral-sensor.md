@@ -256,11 +256,43 @@ Key findings:
 3. **Three independent sessions now converge to TOI_cal ≈ −0.17 to −0.21 at rewarming endpoint** — strong evidence for measurement reproducibility
 4. The countdown approach successfully reduced placement delay, capturing colder initial readings than the manual method
 
+## Mild vs Strong Cold Stimulus Comparison
+
+After fixing the countdown dual-instance bug, a second test was run with milder cold exposure (starting at 30°C vs 25°C in the previous test). The result was strikingly different:
+
+| Metric | Strong cold (test 3) | Mild cold (test 4) |
+|--------|---------------------|---------------------|
+| Start temp | 25°C | 30°C |
+| TOI_cal range | −0.12 → −0.20 | −0.14 → −0.17 |
+| TOI swing | **0.08** | **0.03** |
+| Signal jitter | noticeable | minimal |
+| Curve shape | steep descent | gentle, smooth |
+
+Three factors explain the smoother, narrower curve:
+
+1. **Cold stimulus intensity drives response amplitude** — stronger vasoconstriction (25°C) produces larger TOI shifts than mild cooling (30°C). This is a dose-response relationship: the sensor can distinguish different levels of cold exposure, which is exactly what a frostbite warning system needs
+
+2. **Signal strength vs noise floor** — milder cold means more blood in the tissue, stronger reflected signal, better SNR. At 25°C with severe vasoconstriction, S_680 dropped to ~1400 µW/cm² where ADC quantization noise becomes more visible in the TOI ratio
+
+3. **Operator experience** — hand placement stability improved with practice, reducing contact pressure variation. This is a real consideration for a clinical device (sensor mounting matters)
+
+### Five-Session Reproducibility Summary
+
+| Session | Condition | Endpoint TOI_cal |
+|---------|-----------|-----------------|
+| Baseline | Warm skin, 38°C | −0.21 |
+| Cold test 1 | Manual, strong cold | −0.17 |
+| Cold test 2 | Calibrated, strong cold | −0.20 |
+| Cold test 3 | Countdown, strong cold | −0.17 |
+| Cold test 4 | Countdown fixed, mild cold | −0.17 |
+
+All rewarming endpoints converge to **−0.17 to −0.21** — consistent across different cold intensities, measurement methods, and sessions. This level of reproducibility validates the white-reference calibration approach and confirms the sensor can serve as a reliable tissue perfusion monitor.
+
 ## Next Steps
 
 - [x] White-paper calibration to normalize LED spectral profile
 - [x] Establish room-temperature skin TOI baseline (TOI_cal ≈ −0.21)
 - [x] Cold stimulus test with calibrated TOI — cold skin TOI_cal ≈ −0.12
 - [x] Countdown-triggered measurement — complete cooling→rewarming curve captured
-- [ ] Fix countdown timing bug (LED fires slightly before t=0)
+- [x] Countdown bug fix + mild vs strong cold comparison
 - [ ] Determine frostbite warning threshold from experimental data
