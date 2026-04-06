@@ -13,7 +13,6 @@ AS7263 冷敷皮肤监测
 平台：i.MX8MP EVK, Python 3, I2C3 (J21)
 接线：AS7263 SDA -> J21 Pin3, SCL -> J21 Pin5, 3.3V -> Pin1, GND -> Pin9
 
-Ning Kang, 2026-03-10
 """
 
 import os
