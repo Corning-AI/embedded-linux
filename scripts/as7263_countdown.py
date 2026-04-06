@@ -14,10 +14,17 @@ import sys
 import time
 import struct
 import fcntl
+import signal
+import subprocess
 import threading
 import gi
 gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk, GLib
+
+# Kill any previous instance to prevent dual-window overlap
+# (overlapping countdowns cause confusing display: 10,9,8,7,10,9,8...)
+subprocess.run(["killall", "-9", "as7263_countdown"], stderr=subprocess.DEVNULL)
+subprocess.run(["killall", "-9", "as7263_display"], stderr=subprocess.DEVNULL)
 
 # --- Config ---
 COUNTDOWN = int(sys.argv[1]) if len(sys.argv) > 1 else 10
