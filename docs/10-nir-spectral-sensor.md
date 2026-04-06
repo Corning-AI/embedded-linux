@@ -338,6 +338,19 @@ Key observations with site-corrected DPF:
 - The fingertip DPF ratio (1.20) amplifies the correction compared to forearm (1.11), revealing physiological dynamics that were hidden with incorrect site parameters
 - **Using the wrong measurement site's DPF masks real physiological changes** — this is why clinical NIRS protocols always specify the measurement site
 
+### Why Measurement Site Matters for DPF
+
+The DPF absolute values differ between body sites, but what actually determines measurement sensitivity is the **DPF ratio** (680nm / 860nm):
+
+| Site | DPF_680 | DPF_860 | DPF ratio | StO2 range | Effect |
+|------|---------|---------|-----------|------------|--------|
+| Forearm | 6.51 | 5.86 | 1.11 | 0.36–0.39 | Compressed — cold vs warm nearly indistinguishable |
+| Fingertip | 3.0 | 2.5 | 1.20 | 0.24–0.43 | Spread out — cold/warm clearly separated |
+
+A higher DPF ratio amplifies the scattering correction, improving the resolution of physiological changes. With the wrong site's DPF, the reactive hyperemia signal (StO2 = 0.24) gets compressed to 0.36, nearly indistinguishable from the 0.38 baseline — the real physiological dynamics are masked.
+
+This is why clinical NIRS protocols always specify the measurement site. The same person at the same moment can show 10–20 percentage points difference in StO2 between fingertip and forearm, purely due to tissue geometry and scattering properties.
+
 Ref: Duncan A. et al. (1995), *Phys Med Biol* 40(2):295-304; Scholkmann F. & Wolf M. (2013), "General equation for the DPF of the adult head, neonatal head, adult forearm, and adult leg", *J Biomed Opt* 18(10):105004.
 
 ## Next Steps
