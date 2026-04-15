@@ -44,7 +44,8 @@ ORANGE = '#ff8833'
 PURPLE = '#aa66ff'
 WHITE = '#ffffff'
 
-OUT = 'c:/Users/corni/OneDrive - Nanyang Technological University/ntu_rf/M266_EmbeddedLinux/docs/'
+import os
+OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'docs') + os.sep
 
 
 # ════════════════════════════════════════════

@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Apple-authentic dark wallpaper for i.MX8MP EVK — v10.
-Dr. Ning Kang — Research Fellow, NTU Singapore.
 Color: Apple system dark (#000000–#1C1C1E) + accent blue #0A84FF.
 Nearly pure black background — premium comes from restraint, not color.
 Top area clean for sensor data overlay.
+
+Customize the hero name/title variables below for your own build.
 """
 
 import math
@@ -94,7 +95,7 @@ for sx in range(sep_margin, W - sep_margin):
 draw = ImageDraw.Draw(img)
 
 # --- Hero name ---
-name = "Dr. Ning Kang"
+name = os.environ.get("WALLPAPER_NAME", "Embedded Linux Lab")
 name_bbox = draw.textbbox((0, 0), name, font=f_hero)
 name_w = name_bbox[2] - name_bbox[0]
 name_x = (W - name_w) // 2
@@ -102,7 +103,7 @@ name_y = int(H * 0.76)
 draw.text((name_x, name_y), name, fill=WHITE, font=f_hero)
 
 # --- Title (Apple secondary gray) ---
-title = "Research Fellow  |  NTU Singapore"
+title = os.environ.get("WALLPAPER_TITLE", "i.MX8MP  |  NIR Tissue Monitor")
 t_bbox = draw.textbbox((0, 0), title, font=f_title)
 t_x = (W - (t_bbox[2] - t_bbox[0])) // 2
 t_y = name_y + 72
