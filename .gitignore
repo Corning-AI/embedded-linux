@@ -62,3 +62,8 @@ cache/
 
 # Datasets
 datasets/
+
+# Local-only synthesized analysis (not for public repo)
+cold_therapy_showcase/12_skin_cooling_8sites.xlsx
+cold_therapy_showcase/12_skin_cooling_8sites.png
+scripts/skin_cooling_curves.py
