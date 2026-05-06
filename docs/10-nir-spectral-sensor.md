@@ -514,6 +514,73 @@ surface.write_to_png("/tmp/dashboard_screenshot.png")
 
 Screenshots auto-saved every 5 seconds, pulled via SCP for remote analysis — a visual feedback loop without physical access to the HDMI display.
 
+## Methodological Reflections — Limitations Found in Practice
+
+After the 5 cold-stimulus sessions reported above, a deeper review revealed several fundamental issues with the original framing of "real-time frostbite detection." These notes are recorded here so that anyone inheriting this work understands what worked, what didn't, and why the next iteration should look different.
+
+### AS7263 Was Never Designed for Human Tissue
+
+The AS7263 is an agricultural / industrial NIR spectrometer. ams-OSRAM's official application notes target plant health monitoring (NDVI), food composition (moisture / sugar / fat), plastic recycling, and printed-color verification. SparkFun's hookup guide markets the breakout board as a "plant health detector" and uses leaf NDVI as its first example.
+
+Two literature searches confirm this is more than marketing positioning:
+
+- PubMed search for `AS7263` returns only agricultural / food papers (notably corn frost-damage classification — the sensor really does detect "frostbite" in crops).
+- PubMed search for `frostbite + NIRS` returns **zero** human clinical studies across decades of NIRS research.
+
+This is not a coincidence. It reflects a real mismatch between what NIRS measures (hemoglobin in flowing blood) and what frostbite actually is (ice crystallization in tissue, which displaces blood from the affected microvasculature).
+
+### Four Reasons NIRS Cannot Detect Frostbite Onset
+
+1. **The signal disappears at the critical moment.** When tissue actually freezes, blood is forced out of the affected microvasculature. NIRS depends on blood absorption — no blood, no signal. The sensor sees the precursor (vasoconstriction) but loses the actual freezing event.
+2. **Vasoconstriction is non-specific.** During therapeutic cooling, vasoconstriction is the *desired* outcome. Approaching frostbite, vasoconstriction is the *pathological warning*. Same signal, opposite clinical meaning.
+3. **The reversibility threshold is invisible.** Endothelial damage and microvascular thrombosis (the transition from reversible frostnip to irreversible damage) are not in NIRS's observable. The closest proxy — absent reactive hyperemia after cold removal — can only be assessed *after* cold withdrawal, not in real time.
+4. **Zero clinical literature.** Frostbite + NIRS has zero human PubMed hits across decades. A negative result spanning that many research groups is itself informative.
+
+### Geometric Constraint of the SparkFun Breakout
+
+The SparkFun breakout (25.4 × 17.8 mm, 1.6 mm FR4) acts as a thermal insulator when sandwiched between an ice pack and skin. Steady-state estimate: the skin patch directly under the sensor stays around 22°C while surrounding skin reaches 5–10°C. A >10 K thermal gradient exists at the sensor edge.
+
+This means the 5 sessions documented above did **not** measure local cold-induced frostbite progression. They measured **peri-cooling reflex perfusion** — vasoconstriction propagating from adjacent cooled tissue into the sensor's region of view. The data is still valid, but the research question must be reframed accordingly:
+
+- ❌ Real-time frostbite detection (not feasible with this geometry or this sensor)
+- ✅ Peri-cooling tissue oxygenation response (the actual phenomenon captured)
+- ✅ Cold therapy effectiveness monitoring (auxiliary to skin temperature)
+- ✅ Reactive hyperemia magnitude as microcirculation health proxy (post-cooling assessment)
+
+### Where AS7263 Actually Fits in a Cryotherapy Device
+
+The viable role for AS7263 (or a similar compact NIRS module) is **auxiliary perfusion monitoring complementing skin temperature** — not as the primary frostbite warning. Concrete capabilities:
+
+- **Therapy effectiveness check** — confirms vasoconstriction is actually occurring. A cold pad pressed loosely against skin can show low temperature without engaging perfusion response; only NIRS reveals this.
+- **Soft warnings** — detects (a) over-cooling (StO2 falling without reaching steady state) and (b) microcirculation damage after cold removal (absent reactive hyperemia → potential NFCI). Neither is visible in temperature signal.
+
+What it cannot do:
+
+- Replace skin temperature as primary safety signal — specificity is too low to distinguish "therapeutic vasoconstriction" from "pathological vasoconstriction"
+- Provide an absolute calibrated StO2 — only relative trends within a session
+- Operate during actual ice formation — the signal disappears with the displaced blood
+
+### Hardware Path Forward: Custom Compact PCB
+
+The SparkFun breakout served well as a prototyping platform — it confirmed AS7263 works on Yocto / i.MX 8M Plus and produced the 5-session calibration data. For productization, the next iteration should be:
+
+- A custom 8 × 8 mm PCB with only AS7263 (LGA-20) + a single white LED (SMD 0402)
+- I2C signal routed via flex cable; power and ground from main controller board
+- Board thickness ≤ 0.6 mm, embedded directly into the cold pad to bypass the FR4 thermal barrier
+- This places the sensor's optical view in the core cooled region rather than at the thermal edge
+
+This is a transition from "off-the-shelf prototyping" to "embedded integration." With it, the geometry constraint above is resolved and the system can finally measure the same skin patch that the cold pad is treating.
+
+### Recommended Reframing for EMBC / Future Publication
+
+The manuscript should not claim "NIRS for real-time frostbite detection." Defensible framings supported by literature:
+
+- *NIRS as auxiliary perfusion marker complementing skin temperature in portable cryotherapy*
+- *Peri-cooling reflex perfusion response captured by compact NIR spectroscopy*
+- *Cold therapy effectiveness monitoring via tissue oxygenation index*
+
+The DEVICE_TEMP register should not be cited as evidence of skin temperature change — it reads die temperature, contaminated by LED self-heating.
+
 ## Next Steps
 
 - [x] White-paper calibration to normalize LED spectral profile
