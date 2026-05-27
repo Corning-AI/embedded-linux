@@ -67,3 +67,5 @@ datasets/
 cold_therapy_showcase/12_skin_cooling_8sites.xlsx
 cold_therapy_showcase/12_skin_cooling_8sites.png
 scripts/skin_cooling_curves.py
+internal_only/
+nir_intensity_20260527/
